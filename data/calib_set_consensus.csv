@@ -1,0 +1,355 @@
+﻿assigned_to,Mathematical,Shape(s) is closed,Labeled angles (if any) match drawn angle,Applicable - Labeled angles (if any) match drawn angle,Labeled lengths (if any) match visual proportions,Applicable - Labeled lengths (if any) match visual proportions,Core math properties of the shape(s) are correct,Spatial,Diagram is fully in frame,Diagram elements are scaled to be readable,Labels (if any) are associated with correct elements,Applicable - Labels (if any) are associated with correct elements,Diagram elements don’t problematically overlap,prompt,subcategory,image,tikz,Applicable - Labeled areas (if any) match visual proportions,Labeled areas (if any) match visual proportions
+All (Calibration),,Yes,Yes,,No,N/A,Yes,,Yes,Yes,Yes,,Yes,"right triangle, legs labeled a and b, hypotenuse labeled c",triangle,https://2xavun1dsa0sayar.public.blob.vercel-storage.com/visuals/vis_final-YJ8qEmWrubSCUhgErAJMFbPeE7ISx9.svg,"\documentclass{IM}
+\usepackage{tikz}
+\begin{document}
+
+\begin{tikzpicture}[x=0.9in,y=0.9in]
+\clip (-0.1,-0.1) rectangle (2.3,1.6);
+
+\begin{scope}
+
+\coordinate (A) at (0,0);
+\coordinate (B) at (2,0);
+\coordinate (C) at (2,1.5);
+
+\draw (A) -- (B) -- (C) -- cycle;
+
+\draw[right angle symbol={C}{B}{A}];
+
+\node[vertex,label=below left:{$A$}] at (A) {};
+\node[vertex,label=below right:{$B$}] at (B) {};
+\node[vertex,label=above right:{$C$}] at (C) {};
+
+\node at (1,-0.3) {$b$};
+\node at (2.3,0.75) {$a$};
+\node at (1,1) {$c$};
+
+\end{scope}
+
+\end{tikzpicture}
+
+\end{document}",N/A,No
+All (Calibration),,Yes,No,N/A,No,N/A,Yes,,Yes,Yes,Yes,,Yes,"coordinate grid with triangle RST at R(1,1), S(3,1), T(2,3)",triangle,https://2xavun1dsa0sayar.public.blob.vercel-storage.com/visuals/vis_final-FP34aWTIFniIH7yBK8SmODxBEhsnpI.svg,"\documentclass{IM}
+\usepackage{tikz}
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[FirstQuadrantLabeled,width=\HalfPage,height=\HalfPage,xmin=0,xmax=5,ymin=0,ymax=5,xlabel style={yshift=-8pt},ylabel style={xshift=-8pt},xtick={0,1,2,3,4,5},ytick={0,1,2,3,4,5},grid=both]
+
+\coordinate (R) at (1,1);
+\coordinate (S) at (3,1);
+\coordinate (T) at (2,3);
+
+\draw[line width=1.5pt] (R) -- (S) -- (T) -- (R);
+
+\node[vertex,label=below left:{$R$}] at (R) {};
+\node[vertex,label=below right:{$S$}] at (S) {};
+\node[vertex,label=above:{$T$}] at (T) {};
+
+\end{axis}
+\end{tikzpicture}
+\end{document}",N/A,No
+All (Calibration),,Yes,Yes,,Yes,,Yes,,Yes,Yes,Yes,,Yes,right triangle B with two sides of length 4,triangle,https://2xavun1dsa0sayar.public.blob.vercel-storage.com/visuals/vis_final-GzZQhEy44ld3eXJ959SHVTMCdGbX2b.svg,"\documentclass{IM}
+\usepackage{tikz}
+\begin{document}
+
+\begin{tikzpicture}[x=1in,y=1in]
+
+\coordinate (A) at (0,0);
+\coordinate (B) at (4,0);
+\coordinate (C) at (0,4);
+
+\draw (A) -- (B) -- (C) -- cycle;
+
+\draw[right angle symbol={C}{A}{B}];
+
+\node[vertex,label=below left:{$A$}] at (A) {};
+\node[vertex,label=below right:{$B$}] at (B) {};
+\node[vertex,label=above left:{$C$}] at (C) {};
+
+\node at (2,-0.3) {4};
+\node at (-0.3,2) {4};
+
+\end{tikzpicture}
+
+\end{document}",N/A,No
+All (Calibration),,No,No,N/A,No,N/A,No,,No,No,No,N/A,Yes,"rectangle divided into 4 equal parts, 2 parts shaded",rectangle,https://2xavun1dsa0sayar.public.blob.vercel-storage.com/visuals/vis_final-Po4doKQb1zOqOtTPHQexaEnIJp3G5k.svg,"\documentclass{IM}
+\usepackage{tikz}
+\begin{document}
+
+\begin{tikzpicture}[x=1in,y=1in]
+    \clip(-1.5,-0.75) rectangle (1.5,0.75);
+    
+    % Draw rectangle divided into 4 equal parts
+    \draw (0,0) rectangle (2,1);
+    \draw (1,0) -- (1,1);  % vertical line dividing into halves
+    \draw (0,0.5) -- (2,0.5);  % horizontal line dividing into quarters
+    
+    % Shade 2 parts
+    \fill[LBlue] (0,0) rectangle (1,0.5);  % bottom left
+    \fill[LBlue] (1,0.5) rectangle (2,1);  % top right
+\end{tikzpicture}
+
+\end{document}",N/A,No
+All (Calibration),,Yes,No,N/A,No,,Yes,,Yes,Yes,Yes,,Yes,"factor pairs of 18 shown as rectangles: 1x18, 2x9, 3x6 with grid squares",rectangle,https://2xavun1dsa0sayar.public.blob.vercel-storage.com/visuals/vis_final-q72G0xUdelytijZpqe7pv4ixcjecBU.svg,"\documentclass{IM}
+\usepackage{tikz}
+\begin{document}
+
+\def\gridSep{0.3in}
+
+\begin{tikzpicture}[x=\gridSep,y=\gridSep]
+
+% Rectangle 1: 1x18
+\begin{scope}[xshift=0cm, yshift=0cm]
+    % Grid and outer rectangle
+    \draw[line width=.5pt](0,0) grid[step=1] (1,18); 
+    \draw[line width=1pt](0,0) rectangle(1,18); 
+    % Label
+    \node[above] at (0.5,18.2) {$1 \times 18$};
+\end{scope}
+
+% Rectangle 2: 2x9
+\begin{scope}[xshift=2cm, yshift=0cm]
+    % Grid and outer rectangle
+    \draw[line width=.5pt](0,0) grid[step=1] (2,9); 
+    \draw[line width=1pt](0,0) rectangle(2,9); 
+    % Label
+    \node[above] at (1,9.2) {$2 \times 9$};
+\end{scope}
+
+% Rectangle 3: 3x6
+\begin{scope}[xshift=4.5cm, yshift=0cm]
+    % Grid and outer rectangle
+    \draw[line width=.5pt](0,0) grid[step=1] (3,6); 
+    \draw[line width=1pt](0,0) rectangle(3,6); 
+    % Label
+    \node[above] at (1.5,6.2) {$3 \times 6$};
+\end{scope}
+
+\end{tikzpicture}
+\end{document}",,Yes
+All (Calibration),,Yes,No,N/A,No,N/A,Yes,,Yes,Yes,No,N/A,Yes,one star and one circle,circle,https://2xavun1dsa0sayar.public.blob.vercel-storage.com/visuals/vis_final-B34RpTY5Z0nFm5mLx17tCmTijK8eh0.svg,"\documentclass{IM}
+\usepackage{tikz}
+\begin{document}
+\begin{tikzpicture}
+  % Draw a star
+  \node[star, star points=5, star point ratio=2.25, draw=black, fill=yellow, minimum size=1cm] at (0,0) {};
+  
+  % Draw a circle
+  \node[circle, draw=black, fill=blue!30, minimum size=1cm] at (3,0) {};
+\end{tikzpicture}
+\end{document}",N/A,No
+All (Calibration),,Yes,No,N/A,No,N/A,Yes,,Yes,Yes,Yes,,Yes,"clean rectangular prism net in cross/plus shape with grid lines through faces, 6x4 center rectangle, 6x3 rectangles above/below, 4x3 rectangles left/right, areas 24, 18, 12 labeled in centers",rectangular prism,https://2xavun1dsa0sayar.public.blob.vercel-storage.com/visuals/vis_final-MCZYDrhL8731uiEP60BToz81LMX4J0.svg,"\documentclass{IM}
+\usepackage{tikz}
+\begin{document}
+\begin{tikzpicture}[x=0.4in,y=0.4in]
+
+%% Define dimensions
+\def\widthparts{10}
+\def\heightparts{9}
+
+%% Clip to remove unnecessary white space
+\clip (-.1,-.1) rectangle (\widthparts+.1,\heightparts+.1);
+
+%% Draw grid lines
+\draw[line width=0.5pt,black!30] (0,0) grid[step=1] (\widthparts,\heightparts);
+
+%% Center rectangle (6x4) - positioned at (2,3) to (8,7)
+\draw[line width=1.5pt, fill=LBlue] (2,3) rectangle (8,7);
+
+%% Top rectangle (6x3) - positioned at (2,7) to (8,9)
+\draw[line width=1.5pt, fill=LBlue] (2,6) rectangle (8,9);
+
+%% Bottom rectangle (6x3) - positioned at (2,0) to (8,3)
+\draw[line width=1.5pt, fill=LBlue] (2,0) rectangle (8,3);
+
+%% Left rectangle (4x3) - positioned at (0,3) to (2,7)
+\draw[line width=1.5pt, fill=LBlue] (0,3) rectangle (2,7);
+
+%% Right rectangle (4x3) - positioned at (8,3) to (10,7)
+\draw[line width=1.5pt, fill=LBlue] (8,3) rectangle (10,7);
+
+%% Grid lines within each face
+%% Center rectangle grid
+\draw[line width=0.5pt] (3,3) -- (3,7);
+\draw[line width=0.5pt] (4,3) -- (4,7);
+\draw[line width=0.5pt] (5,3) -- (5,7);
+\draw[line width=0.5pt] (6,3) -- (6,7);
+\draw[line width=0.5pt] (7,3) -- (7,7);
+\draw[line width=0.5pt] (2,4) -- (8,4);
+\draw[line width=0.5pt] (2,5) -- (8,5);
+\draw[line width=0.5pt] (2,6) -- (8,6);
+
+%% Top rectangle grid
+\draw[line width=0.5pt] (3,6) -- (3,9);
+\draw[line width=0.5pt] (4,6) -- (4,9);
+\draw[line width=0.5pt] (5,6) -- (5,9);
+\draw[line width=0.5pt] (6,6) -- (6,9);
+\draw[line width=0.5pt] (7,6) -- (7,9);
+\draw[line width=0.5pt] (2,7) -- (8,7);
+\draw[line width=0.5pt] (2,8) -- (8,8);
+
+%% Bottom rectangle grid
+\draw[line width=0.5pt] (3,0) -- (3,3);
+\draw[line width=0.5pt] (4,0) -- (4,3);
+\draw[line width=0.5pt] (5,0) -- (5,3);
+\draw[line width=0.5pt] (6,0) -- (6,3);
+\draw[line width=0.5pt] (7,0) -- (7,3);
+\draw[line width=0.5pt] (2,1) -- (8,1);
+\draw[line width=0.5pt] (2,2) -- (8,2);
+
+%% Left rectangle grid
+\draw[line width=0.5pt] (1,3) -- (1,7);
+\draw[line width=0.5pt] (0,4) -- (2,4);
+\draw[line width=0.5pt] (0,5) -- (2,5);
+\draw[line width=0.5pt] (0,6) -- (2,6);
+
+%% Right rectangle grid
+\draw[line width=0.5pt] (9,3) -- (9,7);
+\draw[line width=0.5pt] (8,4) -- (10,4);
+\draw[line width=0.5pt] (8,5) -- (10,5);
+\draw[line width=0.5pt] (8,6) -- (10,6);
+
+%% Area labels in centers
+\node[font=\large\bfseries] at (5,5) {24};
+\node[font=\large\bfseries] at (5,7.5) {18};
+\node[font=\large\bfseries] at (5,1.5) {18};
+\node[font=\large\bfseries] at (1,5) {12};
+\node[font=\large\bfseries] at (9,5) {12};
+
+\end{tikzpicture}
+\end{document}",,No
+All (Calibration),,Yes,No,N/A,No,N/A,Yes,,Yes,Yes,No,N/A,Yes,"rectangular prism made of unit cubes, 2 layers, 6 cubes per layer",rectangular prism,https://2xavun1dsa0sayar.public.blob.vercel-storage.com/visuals/vis_final-GbLnE0qKV6NuFI3qlquCuMOv8bGLKz.svg,"\documentclass{IM}
+\usepackage{tikz}
+\begin{document}
+
+\newcommand\Ucube[5]{
+\begin{scope}[scale=.25,shift={(#1,#2,#3)},xshift=#4 in ,yshift=#5 in]
+\draw[rounded corners=.1mm,fill=LBlue] (0,0,1)--(1,0,1)--(1,1,1)--(0,1,1)--cycle;
+\draw[rounded corners=.1mm,fill=LBlue] (0,1,0)--(1,1,0)--(1,1,1)--(0,1,1)--cycle;
+\draw[rounded corners=.1mm,fill=LBlue] (1,0,0)--(1,1,0)--(1,1,1)--(1,0,1)--cycle;
+\end{scope}
+}
+
+\newcommand\Outline[5]{
+\begin{scope}[scale=.25,xshift=#4 in ,yshift=#5 in]
+\draw[very thick,rounded corners=.1mm] (0,0,#3)--(#1,0,#3)--(#1,#2,#3)--(0,#2,#3)--cycle;
+\draw[very thick,rounded corners=.1mm] (0,#2,0)--(#1,#2,0)--(#1,#2,#3)--(0,#2,#3)--cycle;
+\draw[very thick,rounded corners=.1mm] (#1,0,0)--(#1,#2,0)--(#1,#2,#3)--(#1,0,#3)--cycle;
+\end{scope}
+}
+
+\begin{tikzpicture}[x=1in, y=1in, z=(45:-.4)]
+\clip (-\QP/2,-\QP/2) rectangle (\QP/2,\QP/2);
+\def\xchange{-1}
+\def\ychange{-1.5}
+\foreach \x in {0,...,2}{
+\foreach \y in {0,...,1}{
+\foreach \z in {0,...,1}{
+\Ucube{\x}{\y}{\z}{\xchange}{\ychange};
+}}}
+\Outline{3}{2}{2}{\xchange}{\ychange};
+\end{tikzpicture}
+\end{document}",N/A,No
+All (Calibration),,Yes,No,N/A,No,N/A,Yes,,Yes,Yes,No,N/A,Yes,"Draw a 3 × 3 × 1 rectangular prism. Attach a 3 × 1 × 2 prism on top of the back row of cubes. Cube outlines only, no shading, no colors.",rectangular prism,https://2xavun1dsa0sayar.public.blob.vercel-storage.com/visuals/vis_final-DqToo9uzqJRouOGWmrsC38dU8nZGe1.svg,"\documentclass{IM}
+\usepackage{tikz}
+\begin{document}
+
+\begin{tikzpicture}[x=0.3in, y=0.3in, z=0.2in]
+
+% Define the grid spacing for individual cubes
+\def\cubeSize{1}
+
+% Draw the 3x3x1 base rectangular prism (9 cubes in a single layer)
+% Bottom face cubes
+\foreach \x in {0,1,2} {
+  \foreach \y in {0,1,2} {
+    % Draw each cube at position (\x, \y, 0)
+    \draw (\x*\cubeSize, \y*\cubeSize, 0) -- 
+          (\x*\cubeSize + \cubeSize, \y*\cubeSize, 0) -- 
+          (\x*\cubeSize + \cubeSize, \y*\cubeSize + \cubeSize, 0) -- 
+          (\x*\cubeSize, \y*\cubeSize + \cubeSize, 0) -- cycle;
+    
+    % Draw vertical edges
+    \draw (\x*\cubeSize, \y*\cubeSize, 0) -- 
+          (\x*\cubeSize, \y*\cubeSize, \cubeSize);
+    \draw (\x*\cubeSize + \cubeSize, \y*\cubeSize, 0) -- 
+          (\x*\cubeSize + \cubeSize, \y*\cubeSize, \cubeSize);
+    \draw (\x*\cubeSize, \y*\cubeSize + \cubeSize, 0) -- 
+          (\x*\cubeSize, \y*\cubeSize + \cubeSize, \cubeSize);
+    \draw (\x*\cubeSize + \cubeSize, \y*\cubeSize + \cubeSize, 0) -- 
+          (\x*\cubeSize + \cubeSize, \y*\cubeSize + \cubeSize, \cubeSize);
+    
+    % Draw top face
+    \draw (\x*\cubeSize, \y*\cubeSize, \cubeSize) -- 
+          (\x*\cubeSize + \cubeSize, \y*\cubeSize, \cubeSize) -- 
+          (\x*\cubeSize + \cubeSize, \y*\cubeSize + \cubeSize, \cubeSize) -- 
+          (\x*\cubeSize, \y*\cubeSize + \cubeSize, \cubeSize) -- cycle;
+  }
+}
+
+% Draw the 3x1x2 prism on top of the back row (y=2)
+% This creates 6 additional cubes: 3 cubes wide, 1 cube deep, 2 cubes high
+\foreach \x in {0,1,2} {
+  \foreach \z in {1,2} {
+    % Draw each cube at position (\x, 2, \z)
+    % Bottom face (connects to the cube below)
+    \draw (\x*\cubeSize, 2*\cubeSize, \z*\cubeSize) -- 
+          (\x*\cubeSize + \cubeSize, 2*\cubeSize, \z*\cubeSize) -- 
+          (\x*\cubeSize + \cubeSize, 2*\cubeSize + \cubeSize, \z*\cubeSize) -- 
+          (\x*\cubeSize, 2*\cubeSize + \cubeSize, \z*\cubeSize) -- cycle;
+    
+    % Vertical edges
+    \draw (\x*\cubeSize, 2*\cubeSize, \z*\cubeSize) -- 
+          (\x*\cubeSize, 2*\cubeSize, \z*\cubeSize + \cubeSize);
+    \draw (\x*\cubeSize + \cubeSize, 2*\cubeSize, \z*\cubeSize) -- 
+          (\x*\cubeSize + \cubeSize, 2*\cubeSize, \z*\cubeSize + \cubeSize);
+    \draw (\x*\cubeSize, 2*\cubeSize + \cubeSize, \z*\cubeSize) -- 
+          (\x*\cubeSize, 2*\cubeSize + \cubeSize, \z*\cubeSize + \cubeSize);
+    \draw (\x*\cubeSize + \cubeSize, 2*\cubeSize + \cubeSize, \z*\cubeSize) -- 
+          (\x*\cubeSize + \cubeSize, 2*\cubeSize + \cubeSize, \z*\cubeSize + \cubeSize);
+    
+    % Top face
+    \draw (\x*\cubeSize, 2*\cubeSize, \z*\cubeSize + \cubeSize) -- 
+          (\x*\cubeSize + \cubeSize, 2*\cubeSize, \z*\cubeSize + \cubeSize) -- 
+          (\x*\cubeSize + \cubeSize, 2*\cubeSize + \cubeSize, \z*\cubeSize + \cubeSize) -- 
+          (\x*\cubeSize, 2*\cubeSize + \cubeSize, \z*\cubeSize + \cubeSize) -- cycle;
+  }
+}
+
+\end{tikzpicture}
+\end{document}",N/A,No
+All (Calibration),,No,No,N/A,No,N/A,No,,No,Yes,No,N/A,Yes,"cube L-shape, 2x2 square with 3 cubes extending in a row",cube,https://2xavun1dsa0sayar.public.blob.vercel-storage.com/visuals/vis_final-RfqYRXpYKUKpfWFKlK2pDSSAJAc8tX.svg,"\documentclass{IM}
+\usepackage{tikz}
+\begin{document}
+
+\newcommand\Ucube[5]{
+\begin{scope}[scale=.25,shift={(#1,#2,#3)},xshift=#4 in ,yshift=#5 in]
+\draw[rounded corners=.1mm,fill=LBlue] (0,0,1)--(1,0,1)--(1,1,1)--(0,1,1)--cycle;
+\draw[rounded corners=.1mm,fill=LBlue] (0,1,0)--(1,1,0)--(1,1,1)--(0,1,1)--cycle;
+\draw[rounded corners=.1mm,fill=LBlue] (1,0,0)--(1,1,0)--(1,1,1)--(1,0,1)--cycle;
+\end{scope}
+}
+
+\begin{tikzpicture}[x=1in, y=1in, z=(45:-.4)]
+\clip (-\QP/2,-\QP/2) rectangle (\QP/2,.7);
+\def\xchange{-1}
+\def\ychange{-1}
+
+% 2x2 square base (4 cubes)
+\foreach \x/\y/\z in {
+0/0/0,
+1/0/0,
+0/1/0,
+1/1/0
+}{\Ucube{\x}{\y}{\z}{\xchange}{\ychange};}
+
+% 3 cubes extending in a row from the square
+\foreach \x/\y/\z in {
+2/0/0,
+3/0/0,
+4/0/0
+}{\Ucube{\x}{\y}{\z}{\xchange}{\ychange};}
+
+\end{tikzpicture}
+
+\end{document}",N/A,No
