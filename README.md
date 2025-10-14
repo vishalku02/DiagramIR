@@ -2,11 +2,14 @@
 
 Experiment code for **DiagramIR: An Automatic Evaluation Pipeline for Educational Math Diagrams**.
 
+DiagramIR is a scalable and reliable method for automatic evaluation of geometric figures. It uses as a language model to translate diagram code into an *intermediate representaiton (IR)*,a standardized, structured format where rule-based checks can be applied against the key geometric and mathemtical constraints of the figure. 
+This approach achieves higher agreement with human raters (Cohen’s K) and enables smaller models, such as GPT-4.1 Mini, to perform on par with larger frontier models like GPT-5—at nearly 10x lower inference cost.
+
 ## Requirements
 
-- **ImageMagick** (`magick` CLI) for PDF→PNG conversion.
-- **TeX distribution** with `lualatex` and `dvisvgm` (TeX Live / MacTeX recommended).
-- Optional: [uv](https://docs.astral.sh/uv/) for environment management.
+- **ImageMagick** (`magick` CLI) 
+- **TeX distribution** with `lualatex` and `dvisvgm` 
+- Optional: [uv](https://docs.astral.sh/uv/) fßor environment management.
 
 Verify the system tools are on your `PATH`:
 
