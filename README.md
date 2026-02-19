@@ -1,15 +1,49 @@
 # DiagramIR
 
 Experiment code for **DiagramIR: An Automatic Evaluation Pipeline for Educational Math Diagrams**.
+ArXiv: https://arxiv.org/abs/2511.08283
 
 DiagramIR is a scalable and reliable method for automatic evaluation of geometric figures. It uses a language model to translate diagram code into an *intermediate representation (IR)*, a standardized, structured format where rule-based checks can be applied against the key geometric and mathematical constraints of the figure.
 This approach achieves higher agreement with human raters (Cohen’s K) and enables smaller models, such as GPT-4.1 Mini, to perform on par with larger frontier models like GPT-5—at nearly 10x lower inference cost.
 
-## Notebook Workflow
-Run the two evaluation notebooks first, then the analysis notebook to compare results:
-1. `notebooks/backtranslation_evaluation.ipynb`
-2. `notebooks/llm_judge_evaluation.ipynb`
-3. `notebooks/backtranslation_analysis.ipynb`
+```mermaid
+flowchart LR
+A[Data: Diagrams Test Set]
+H[Human Annotations]
+
+subgraph BT[Backtranslation Pipeline]
+    BT1[Extract IR from TikZ]
+    BT2[Apply Rule-Based Checks]
+    BT1 --> BT2
+end
+
+subgraph LJ[LLM-as-Judge Pipeline]
+    LJ1[Execute Judge Evaluation]
+end
+
+subgraph OUT[Output / Analysis]
+    COMPARE[Compare Backtranslation vs LLM-as-Judge]
+    KAPPA[Cohen's Kappa w/ Human Annotations]
+    COST[Cost + Latency Metrics]
+    COMPARE --> KAPPA
+    COMPARE --> COST
+end
+
+A --> BT1
+A --> LJ1
+H --> COMPARE
+BT2 --> COMPARE
+LJ1 --> COMPARE
+
+style A fill:#f3f4f6,stroke:#9ca3af,color:#111827
+style H fill:#ffd791,stroke:#ffb81c,color:#5a4300
+style BT1 fill:#7dceeb,stroke:#0095c8,color:#0b3b4a
+style BT2 fill:#7dceeb,stroke:#0095c8,color:#0b3b4a
+style LJ1 fill:#7dceeb,stroke:#0095c8,color:#0b3b4a
+style COMPARE fill:#aad7a5,stroke:#43b02a,color:#173d17
+style KAPPA fill:#aad7a5,stroke:#43b02a,color:#173d17
+style COST fill:#aad7a5,stroke:#43b02a,color:#173d17
+```
 
 ## Requirements
 
@@ -55,34 +89,26 @@ Required entries:
 
 ## Repository Layout
 
-- Root entry modules:
-  - `backtranslation.py` – TikZ → IR extraction helpers (includes `compile_tikz`).
-  - `llm_judge.py` – LLM-as-Judge evaluation harness.
-  - `evaluator.py` – Rule-based checks applied to extracted IR.
-- `utils/` – Internal schemas, geometry utilities, model wrappers, and judge prompts.
-- `scripts/` – Utilities for cache cleanup and judge rendering.
-- `notebooks/` – Notebook-first execution and analysis surface.
-- `data/` – Benchmark prompts and human annotation CSVs.
-- `results/` – Cached model outputs and evaluation results.
+- Core modules:
+  - `backtranslation.py` – TikZ -> IR step.
+  - `evaluator.py` – Rule-based checks applied against the IR.
+  - `llm_judge.py` – LLM-as-Judge evaluation functions.
+- `utils/` –  Schemas, geometry utilities, model wrappers, and judge prompts.
+- `scripts/` – Utilities for for LLM-as-a-judge.
+- `notebooks/`
+- `data/` – Test set and ground truth human annotation CSVs.
+- `results/`
 
 ## Usage
 
 ### Backtranslation Workflow
 
 - Run `notebooks/backtranslation_evaluation.ipynb` to generate model IR extractions and populate `results/backtranslation/`.
-- Run `notebooks/backtranslation_analysis.ipynb` to compare approaches and compute agreement, cost, and timing metrics.
 
 ### LLM-as-Judge Workflow
 
-- Run `notebooks/llm_judge_evaluation.ipynb` for the notebook-first judge execution path.
-- Optional: pre-render judge PNGs if you need image inputs:
-  ```bash
-  python scripts/precompute_judge_pngs.py
-  ```
-  Requires `magick`, `lualatex`, and `dvisvgm`.
+- Run `notebooks/llm_judge_evaluation.ipynb`
 
-- Optional CLI (secondary to notebooks):
-  ```bash
-  python llm_judge.py --csv data/geometric_shapes_test_set.csv --mode both --models gpt-4.1-mini --limit 10
-  ```
-  Results will appear under `results/llm_judge/<mode>/<model>/diagram_*.json`.
+### Analysis
+
+- Run `notebooks/backtranslation_analysis.ipynb` to compare eval approaches and compute agreement, cost, and timing metrics.

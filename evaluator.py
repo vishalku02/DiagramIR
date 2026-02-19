@@ -8,37 +8,34 @@ from pydantic import ValidationError
 from shapely.geometry import Polygon, Point, LineString
 from PIL import ImageFont
 import os
-from typing import Optional
+from typing import Callable, Optional, TypedDict
 import numpy as np
 
-from utils.geometry_engine import (
-    _axes_from_coordinate_system,
-    _base_z_vector,
-    _dimension_to_pt,
-    _eval_simple_expression,
-    _parse_axis_vector,
-    _parse_simple_term,
-    _shift_to_units,
-    apply_matrix_transform,
-    apply_transform_only,
-    apply_transforms,
-    build_transformation_matrix,
-    expand_macros,
-    expand_unit_cube_faces,
-    generate_arc_geometry,
-    project_3d_to_2d,
-    rotate_point_around_center,
-    unit_cube_faces,
-    unit_cube_vertices,
-    to_geometry,
-    to_pt,
-    _to_float_default,
-    _resolve_transform_scale,
-    _resolve_transform_shift,
-    transformed_3d_vertices,
-)
+import utils.geometry_engine as geometry_engine
 
-from utils.ir_schema import TikzIR
+from utils.schema_ir import TikzIR
+
+
+class GeometryRecord(TypedDict, total=False):
+    entity: object
+    geometry: object
+    kind: str
+
+
+class NumericLabelRecord(TypedDict):
+    entity: object
+    geometry: object
+    value: float
+    text: str
+
+
+class ProportionPairRecord(TypedDict, total=False):
+    label_value: float
+    label_text: str
+    segment_geometry: object
+    segment_id: object
+    polygon_geometry: object
+    polygon_id: object
 
 class Evaluator:
     """
@@ -47,12 +44,18 @@ class Evaluator:
 
      """
 
-    EPS_LENGTH = 1e-3 # 0.1%
-    EPS_ANGLE = 1e-2 # 1%
+    # GLOBAL TOLERANCES
+    EPS_LENGTH = 1e-3  # 0.1%
+    EPS_ANGLE = 1e-2  # 1%
     EPS_LAW_SINES = 1e-1
-    CANVAS_TOLERANCE_PT = 5.0  # allow a 1pt slack when checking frame boundaries
+    DEGENERACY_TOLERANCE = 1e-6
 
-    # label matching tolerances
+    # CANVAS SETTINGS
+    CANVAS_TOLERANCE_PT = 5.0
+    PAGE_WIDTH_IN = 8.5
+    PAGE_HEIGHT_IN = 11.0
+
+    # LABEL TOLERANCES
     ANGLE_LABEL_BASE_TOLERANCE_PT = 55.0
     NUMERIC_LABEL_BASE_TOLERANCE_PT = 55.0
     TEXT_LABEL_BASE_TOLERANCE_PT = 75.0
@@ -61,15 +64,27 @@ class Evaluator:
     MAX_LABEL_TOLERANCE_PT = 100.0
     ARC_ENDPOINT_TOLERANCE_PT = 1.0
 
-
-    # readability threshold
+    # READABILITY SETTINGS
     MIN_ELEMENT_DIMENSION_RELATIVE = 0.01  # 1% of canvas min dimension
-    DEGENERACY_TOLERANCE = 1e-6
 
-    PAGE_WIDTH_IN = 8.5
-    PAGE_HEIGHT_IN = 11.0
+    # PROPORTION CHECK SETTINGS
+    PROPORTION_REL_TOL = 0.05
+    PROPORTION_SNAP_TO_EDGE_TOLERANCE_PT = 12.0
+    PROPORTION_AREA_INTERIOR_SHRINK_PT = 2.0
 
-    # problematic overlap tolerances
+    # NUMERICAL STABILITY SETTINGS
+    DENOMINATOR_EPSILON = 1e-9
+    COORDINATE_ROUND_DECIMALS = 6
+
+    # 3D/SHAPE CHECK SETTINGS
+    THREE_D_VOLUME_OVERLAP_TOLERANCE = 1e-6
+    SHAPE_CLOSURE_TOLERANCE = 1e-4
+    THREE_D_PLANE_MATCH_TOLERANCE = 1e-4
+    THREE_D_PART_MIN_DISTINCT_CORNERS = 7
+    THREE_D_PART_MAX_DISTINCT_CORNERS = 8
+    NODE_FACE_DYNAMIC_AREA_DIVISOR = 3.0
+
+    # OVERLAP TOLERANCES
     NODE_OVERLAP_AREA_TOLERANCE_PT2 = 2.0
     NODE_EDGE_DISTANCE_TOLERANCE_PT = 1.0
     NODE_FACE_BOUNDARY_OVERLAP_AREA_TOLERANCE_PT2 = 1.0
@@ -106,34 +121,6 @@ class Evaluator:
     DEFAULT_FONT_SIZE_PT = 11.4 # pt
     DEFAULT_FONT_PATH = os.path.join(os.path.dirname(__file__), "styles", "OpenSans-VariableFont_wdth,wght.ttf")
 
-    # Geometry helpers were extracted for clarity; binding them here keeps the
-    # calls identical to the prevoius implementation.
-    expand_macros = expand_macros
-    to_pt = to_pt
-    _parse_simple_term = _parse_simple_term
-    _eval_simple_expression = _eval_simple_expression
-    _shift_to_units = _shift_to_units
-    _parse_axis_vector = _parse_axis_vector
-    _axes_from_coordinate_system = _axes_from_coordinate_system
-    _base_z_vector = _base_z_vector
-    _dimension_to_pt = _dimension_to_pt
-    build_transformation_matrix = build_transformation_matrix
-    apply_matrix_transform = apply_matrix_transform
-    apply_transforms = apply_transforms
-    apply_transform_only = apply_transform_only
-    generate_arc_geometry = generate_arc_geometry
-    project_3d_to_2d = project_3d_to_2d
-    rotate_point_around_center = rotate_point_around_center
-    to_geometry = to_geometry
-    unit_cube_vertices = unit_cube_vertices
-    unit_cube_faces = unit_cube_faces
-    expand_unit_cube_faces = expand_unit_cube_faces
-    _to_float_default = _to_float_default
-    _resolve_transform_scale = _resolve_transform_scale
-    _resolve_transform_shift = _resolve_transform_shift
-    transformed_3d_vertices = transformed_3d_vertices
-
-
     def __init__(self, debug: bool = False, enforce_page_bounds: bool = False):
         self.debug = debug
         self.enforce_page_bounds = enforce_page_bounds
@@ -143,10 +130,11 @@ class Evaluator:
             self.diagram_fully_in_canvas,
             self.labels_associated_with_elements,
             self.diagram_elements_dont_problematically_overlap,
-            self.diagram_elements_are_readable_size,
+            self.diagram_elements_are_readable_size, 
             self.shape_outlines_are_closed,
             self.core_mathematical_properties_of_shapes_correct,
             self.labeled_lengths_areas_match_proportions,
+            # users get a view into the data model, perhaps let them define values per the rules that we're expecting?
         ]
 
         self._font_cache = None
@@ -180,6 +168,315 @@ class Evaluator:
         if isinstance(value, list):
             return [self._wrap_namespace(item) for item in value]
         return value
+
+    def _summarize_items(self, items: list[str], *, limit: int = 3, noun: str = "more") -> str:
+        summary = "; ".join(items[:limit])
+        if len(items) > limit:
+            summary += f" (+{len(items) - limit} {noun})"
+        return summary
+
+    def _summarize_issues(self, issues: list[str], *, limit: int = 3) -> str:
+        return self._summarize_items(issues, limit=limit, noun="more")
+
+    def _build_assignment_success_message(
+        self,
+        *,
+        label: str,
+        assigned_count: int,
+        assignments: list[str],
+        tie_notes: list[str],
+    ) -> str:
+        message = f"{label} ({assigned_count} total)"
+        if assignments:
+            message += ": " + "; ".join(assignments)
+        if tie_notes:
+            message += f" (ties noted: {self._summarize_items(tie_notes, limit=2, noun='more ties')})"
+        return message
+
+    def _collect_geometries(
+        self,
+        ir,
+        coordinate_system,
+        attribute_name: str,
+        *,
+        kind: Optional[str] = None,
+        validator: Optional[Callable[[object], bool]] = None,
+    ) -> list[GeometryRecord]:
+        collected = []
+        for entity in getattr(ir, attribute_name, []) or []:
+            if validator and not validator(entity):
+                continue
+            transform = getattr(entity, 'transform', None)
+            geometry = geometry_engine.to_geometry(self, entity, coordinate_system, transform)
+            if geometry is None or geometry.is_empty:
+                continue
+            record = {'entity': entity, 'geometry': geometry}
+            if kind is not None:
+                record['kind'] = kind
+            collected.append(record)
+        return collected
+
+    def _parse_numeric_label_value(self, text: str) -> Optional[float]:
+        cleaned = self.clean_latex_text(text)
+        frac = re.fullmatch(r'\s*(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)\s*', cleaned)
+        if frac:
+            try:
+                return float(frac.group(1)) / float(frac.group(2))
+            except ZeroDivisionError:
+                return None
+        match = re.search(r'(\d+(?:\.\d+)?)', cleaned)
+        if not match:
+            return None
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+
+    def _collect_proportion_segments(self, ir, coordinate_system) -> list[GeometryRecord]:
+        segments: list[GeometryRecord] = []
+        for record in self._collect_geometries(ir, coordinate_system, 'line_segments'):
+            geometry = record['geometry']
+            if not isinstance(geometry, LineString):
+                try:
+                    geometry = LineString(list(geometry.coords))
+                except Exception:
+                    continue
+            segments.append({'entity': record['entity'], 'geometry': geometry})
+        return segments
+
+    def _collect_proportion_polygons(self, ir, coordinate_system) -> list[GeometryRecord]:
+        polygons: list[GeometryRecord] = []
+        for record in self._collect_geometries(ir, coordinate_system, 'shapes'):
+            if record['geometry'].geom_type == 'Polygon':
+                polygons.append({'entity': record['entity'], 'geometry': record['geometry']})
+        for record in self._collect_geometries(ir, coordinate_system, 'rectangle_primitives'):
+            if record['geometry'].geom_type == 'Polygon':
+                polygons.append({'entity': record['entity'], 'geometry': record['geometry']})
+        return polygons
+
+    def _collect_numeric_labels_for_proportions(self, ir, coordinate_system) -> list[NumericLabelRecord]:
+        labels: list[NumericLabelRecord] = []
+
+        for node in getattr(ir, 'nodes', []) or []:
+            raw = getattr(node, 'text', '') or ''
+            cleaned = self.clean_latex_text(raw)
+            if not cleaned or self._classify_label(raw, cleaned) != 'numeric':
+                continue
+            geom = geometry_engine.to_geometry(self, node, coordinate_system, getattr(node, 'transform', None))
+            if geom is None or geom.is_empty:
+                continue
+            value = self._parse_numeric_label_value(cleaned)
+            if value is None:
+                continue
+            labels.append({'entity': node, 'geometry': geom, 'value': value, 'text': cleaned})
+
+        for segment in getattr(ir, 'line_segments', []) or []:
+            segment_geometry = geometry_engine.to_geometry(
+                self, segment, coordinate_system, getattr(segment, 'transform', None)
+            )
+            if segment_geometry is None or segment_geometry.is_empty:
+                continue
+
+            for sub_node in getattr(segment, 'nodes', []) or []:
+                raw = getattr(sub_node, 'text', '') or ''
+                cleaned = self.clean_latex_text(raw)
+                if not cleaned or self._classify_label(raw, cleaned) != 'numeric':
+                    continue
+                value = self._parse_numeric_label_value(cleaned)
+                if value is None:
+                    continue
+                geometry = geometry_engine.to_geometry(
+                    self, sub_node, coordinate_system, getattr(sub_node, 'transform', None)
+                )
+                if geometry is None or geometry.is_empty:
+                    midpoint = segment_geometry.interpolate(0.5, normalized=True)
+                    geometry = Point(float(midpoint.x), float(midpoint.y))
+                labels.append({'entity': segment, 'geometry': geometry, 'value': value, 'text': cleaned})
+
+            for key in ('label', 'text', 'node_text', 'mid_text', 'annotation'):
+                raw = getattr(segment, key, None)
+                if not raw:
+                    continue
+                cleaned = self.clean_latex_text(raw)
+                if self._classify_label(raw, cleaned) != 'numeric':
+                    continue
+                value = self._parse_numeric_label_value(cleaned)
+                if value is None:
+                    continue
+                midpoint = segment_geometry.interpolate(0.5, normalized=True)
+                geometry = Point(float(midpoint.x), float(midpoint.y))
+                labels.append({'entity': segment, 'geometry': geometry, 'value': value, 'text': cleaned})
+
+        return labels
+
+    def _associate_numeric_labels_for_proportions(
+        self,
+        numeric_labels: list[NumericLabelRecord],
+        segments: list[GeometryRecord],
+        polygons: list[GeometryRecord],
+    ) -> tuple[list[ProportionPairRecord], list[ProportionPairRecord]]:
+        length_pairs: list[ProportionPairRecord] = []
+        area_pairs: list[ProportionPairRecord] = []
+        polygon_interiors = []
+        for polygon in polygons:
+            interior = polygon['geometry'].buffer(-self.PROPORTION_AREA_INTERIOR_SHRINK_PT)
+            if interior.is_empty:
+                interior = polygon['geometry']
+            polygon_interiors.append({'geometry': interior, 'entity': polygon['entity'], 'original': polygon['geometry']})
+
+        for label in numeric_labels:
+            point = label['geometry'].centroid
+            nearest_segment = None
+            nearest_segment_distance = float('inf')
+            for segment in segments:
+                distance = point.distance(segment['geometry'])
+                if distance < nearest_segment_distance:
+                    nearest_segment_distance = distance
+                    nearest_segment = segment
+
+            containing_polygon = None
+            for interior in polygon_interiors:
+                if interior['geometry'].covers(point):
+                    containing_polygon = interior
+                    break
+
+            if nearest_segment is not None and nearest_segment_distance <= self.PROPORTION_SNAP_TO_EDGE_TOLERANCE_PT:
+                length_pairs.append({
+                    'label_value': label['value'],
+                    'segment_geometry': nearest_segment['geometry'],
+                    'segment_id': getattr(nearest_segment['entity'], 'id', None),
+                    'label_text': label['text'],
+                })
+            elif containing_polygon is not None:
+                area_pairs.append({
+                    'label_value': label['value'],
+                    'polygon_geometry': containing_polygon['original'],
+                    'polygon_id': getattr(containing_polygon['entity'], 'id', None),
+                    'label_text': label['text'],
+                })
+            elif nearest_segment is not None:
+                length_pairs.append({
+                    'label_value': label['value'],
+                    'segment_geometry': nearest_segment['geometry'],
+                    'segment_id': getattr(nearest_segment['entity'], 'id', None),
+                    'label_text': label['text'],
+                })
+
+        return length_pairs, area_pairs
+
+    def _check_pairwise_proportions(
+        self,
+        items: list[ProportionPairRecord],
+        *,
+        meas_key: str,
+        label_key: str,
+        what: str,
+    ) -> list[str]:
+        mismatches = []
+        n_items = len(items)
+        if n_items < 2:
+            return mismatches
+        measured = []
+        for item in items:
+            measured_value = (
+                item['segment_geometry'].length if meas_key == 'length' else item['polygon_geometry'].area
+            )
+            measured.append(measured_value)
+
+        for i in range(n_items):
+            for j in range(i + 1, n_items):
+                mi, mj = measured[i], measured[j]
+                li, lj = items[i][label_key], items[j][label_key]
+                lhs = mi * lj
+                rhs = mj * li
+                denom = max(abs(rhs), self.DENOMINATOR_EPSILON)
+                rel_err = abs(lhs - rhs) / denom
+                if rel_err > self.PROPORTION_REL_TOL:
+                    a_desc = items[i].get('segment_id' if meas_key == 'length' else 'polygon_id')
+                    b_desc = items[j].get('segment_id' if meas_key == 'length' else 'polygon_id')
+                    a_desc = f"id={a_desc}" if a_desc is not None else "(no id)"
+                    b_desc = f"id={b_desc}" if b_desc is not None else "(no id)"
+                    mismatches.append(
+                        f"{what}: ({a_desc}, label={li:g}) vs ({b_desc}, label={lj:g}) "
+                        f"→ rel. error {rel_err:.3f}"
+                    )
+        return mismatches
+
+    # Geometry-engine compatibility wrappers.
+    # The extracted geometry module calls helpers via `self.*`.
+    def expand_macros(self, expr: str) -> str:
+        return geometry_engine.expand_macros(self, expr)
+
+    def to_pt(self, value, unit: str = "pt") -> float:
+        return geometry_engine.to_pt(self, value, unit)
+
+    def _parse_simple_term(self, term: str) -> float:
+        return geometry_engine._parse_simple_term(self, term)
+
+    def _eval_simple_expression(self, expr: str) -> float:
+        return geometry_engine._eval_simple_expression(self, expr)
+
+    def _shift_to_units(self, value, axis_base_scale):
+        return geometry_engine._shift_to_units(self, value, axis_base_scale)
+
+    def _parse_axis_vector(self, spec, default_angle_deg):
+        return geometry_engine._parse_axis_vector(self, spec, default_angle_deg)
+
+    def _axes_from_coordinate_system(self, coordinate_system):
+        return geometry_engine._axes_from_coordinate_system(self, coordinate_system)
+
+    def _base_z_vector(self, coordinate_system):
+        return geometry_engine._base_z_vector(self, coordinate_system)
+
+    def _dimension_to_pt(self, dim) -> float:
+        return geometry_engine._dimension_to_pt(self, dim)
+
+    def build_transformation_matrix(self, coordinate_system, transform):
+        return geometry_engine.build_transformation_matrix(self, coordinate_system, transform)
+
+    def apply_matrix_transform(self, coord, matrix):
+        return geometry_engine.apply_matrix_transform(self, coord, matrix)
+
+    def apply_transforms(self, points, coordinate_system, transform):
+        return geometry_engine.apply_transforms(self, points, coordinate_system, transform)
+
+    def apply_transform_only(self, points, transform, axis_scales=None, z_vector_base=None):
+        return geometry_engine.apply_transform_only(self, points, transform, axis_scales, z_vector_base)
+
+    def generate_arc_geometry(self, center, start_angle, end_angle, radius, num_segments=100):
+        return geometry_engine.generate_arc_geometry(
+            self, center, start_angle, end_angle, radius, num_segments
+        )
+
+    def project_3d_to_2d(self, coords_3d, coordinate_system, meta=None):
+        return geometry_engine.project_3d_to_2d(self, coords_3d, coordinate_system, meta)
+
+    def rotate_point_around_center(self, point, center, angle_deg):
+        return geometry_engine.rotate_point_around_center(self, point, center, angle_deg)
+
+    def to_geometry(self, entity, coordinate_system, transform=None):
+        return geometry_engine.to_geometry(self, entity, coordinate_system, transform)
+
+    def unit_cube_vertices(self, cube):
+        return geometry_engine.unit_cube_vertices(self, cube)
+
+    def unit_cube_faces(self, cube):
+        return geometry_engine.unit_cube_faces(self, cube)
+
+    def expand_unit_cube_faces(self, cube, coordinate_system):
+        return geometry_engine.expand_unit_cube_faces(self, cube, coordinate_system)
+
+    def _to_float_default(self, value, default):
+        return geometry_engine._to_float_default(self, value, default)
+
+    def _resolve_transform_scale(self, transform):
+        return geometry_engine._resolve_transform_scale(self, transform)
+
+    def _resolve_transform_shift(self, transform):
+        return geometry_engine._resolve_transform_shift(self, transform)
+
+    def transformed_3d_vertices(self, vertices, transform):
+        return geometry_engine.transformed_3d_vertices(self, vertices, transform)
 
     def _load_font(self):
         if getattr(self, '_font_cache', None) is not None:
@@ -239,240 +536,14 @@ class Evaluator:
         return results
 
 
-    # ----------------------------------------------------------------------------- global
-
-    PROPORTION_REL_TOL = 0.05
-    def labeled_lengths_areas_match_proportions(self, ir):
-        coordinate_system = getattr(ir, 'tikzpicture_options', None)
-
-        def _parse_numeric(text: str) -> Optional[float]:
-            cleaned = self.clean_latex_text(text)
-            frac = re.fullmatch(r'\s*(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)\s*', cleaned)
-            if frac:
-                try:
-                    return float(frac.group(1)) / float(frac.group(2))
-                except ZeroDivisionError:
-                    return None
-            m = re.search(r'(\d+(?:\.\d+)?)', cleaned)
-            if not m:
-                return None
-            try:
-                return float(m.group(1))
-            except ValueError:
-                return None
-
-        def _collect_segments():
-            out = []
-            for seg in getattr(ir, 'line_segments', []) or []:
-                geom = self.to_geometry(seg, coordinate_system, getattr(seg, 'transform', None))
-                if geom is None or geom.is_empty:
-                    continue
-                if not isinstance(geom, LineString):
-                    try:
-                        geom = LineString(list(geom.coords))
-                    except Exception:
-                        continue
-                out.append({'entity': seg, 'geometry': geom})
-            return out
-
-        def _collect_shapes():
-            polys = []
-            for shp in getattr(ir, 'shapes', []) or []:
-                geom = self.to_geometry(shp, coordinate_system, getattr(shp, 'transform', None))
-                if geom is None or geom.is_empty:
-                    continue
-                if geom.geom_type == 'Polygon':
-                    polys.append({'entity': shp, 'geometry': geom})
-            for rect in getattr(ir, 'rectangle_primitives', []) or []:
-                geom = self.to_geometry(rect, coordinate_system, getattr(rect, 'transform', None))
-                if geom is None or geom.is_empty:
-                    continue
-                if geom.geom_type == 'Polygon':
-                    polys.append({'entity': rect, 'geometry': geom})
-            return polys
-
-        def _collect_numeric_labels():
-            labels = []
-
-            for node in getattr(ir, 'nodes', []) or []:
-                raw = getattr(node, 'text', '') or ''
-                cleaned = self.clean_latex_text(raw)
-                if not cleaned:
-                    continue
-                if self._classify_label(raw, cleaned) != 'numeric':
-                    continue
-                geom = self.to_geometry(node, coordinate_system, getattr(node, 'transform', None))
-                if geom is None or geom.is_empty:
-                    continue
-                val = _parse_numeric(cleaned)
-                if val is None:
-                    continue
-                labels.append({'entity': node, 'geometry': geom, 'value': val, 'text': cleaned})
-
-            for seg in getattr(ir, 'line_segments', []) or []:
-                seg_geom = self.to_geometry(seg, coordinate_system, getattr(seg, 'transform', None))
-                if seg_geom is None or seg_geom.is_empty:
-                    continue
-
-                for sub in getattr(seg, 'nodes', []) or []:
-                    raw = getattr(sub, 'text', '') or ''
-                    cleaned = self.clean_latex_text(raw)
-                    if not cleaned or self._classify_label(raw, cleaned) != 'numeric':
-                        continue
-                    val = _parse_numeric(cleaned)
-                    if val is None:
-                        continue
-                    geom = self.to_geometry(sub, coordinate_system, getattr(sub, 'transform', None))
-                    if geom is None or geom.is_empty:
-                        mid = seg_geom.interpolate(0.5, normalized=True)
-                        geom = Point(float(mid.x), float(mid.y))
-                    labels.append({'entity': seg, 'geometry': geom, 'value': val, 'text': cleaned})
-
-                for key in ('label', 'text', 'node_text', 'mid_text', 'annotation'):
-                    raw = getattr(seg, key, None)
-                    if not raw:
-                        continue
-                    cleaned = self.clean_latex_text(raw)
-                    if self._classify_label(raw, cleaned) != 'numeric':
-                        continue
-                    val = _parse_numeric(cleaned)
-                    if val is None:
-                        continue
-                    mid = seg_geom.interpolate(0.5, normalized=True)
-                    geom = Point(float(mid.x), float(mid.y))
-                    labels.append({'entity': seg, 'geometry': geom, 'value': val, 'text': cleaned})
-
-            return labels
-
-        def _associate_labels(numeric_labels, segments, polygons):
-            length_pairs, area_pairs = [], []
-
-            SNAP_TO_EDGE_TOL_PT = 12.0
-            AREA_INTERIOR_SHRINK_PT = 2.0
-
-            poly_interiors = []
-            for poly in polygons:
-                interior = poly['geometry'].buffer(-AREA_INTERIOR_SHRINK_PT)
-                if interior.is_empty:
-                    interior = poly['geometry']
-                poly_interiors.append({'geometry': interior, 'entity': poly['entity'], 'orig': poly['geometry']})
-
-            for lab in numeric_labels:
-                pt = lab['geometry'].centroid
-
-                nearest_seg = None
-                nearest_seg_dist = float('inf')
-                for s in segments:
-                    d = pt.distance(s['geometry'])
-                    if d < nearest_seg_dist:
-                        nearest_seg_dist = d
-                        nearest_seg = s
-
-                containing = None
-                for interior in poly_interiors:
-                    if interior['geometry'].covers(pt): 
-                        containing = interior
-                        break
-                
-                # feel free to change if you feel like a diff decision boundary is ebtter,
-                # but i assume: if very close to edge (inside or outside polygon, then length)
-                # if considerably inside polygon, then area
-                # else, length to the nearest segment
-                if nearest_seg is not None and nearest_seg_dist <= SNAP_TO_EDGE_TOL_PT:
-                    length_pairs.append({
-                        'label_value': lab['value'],
-                        'seg_geom': nearest_seg['geometry'],
-                        'seg_id': getattr(nearest_seg['entity'], 'id', None),
-                        'label_text': lab['text']
-                    })
-                elif containing is not None:
-                    area_pairs.append({
-                        'label_value': lab['value'],
-                        'poly_geom': containing['orig'],
-                        'poly_id': getattr(containing['entity'], 'id', None),
-                        'label_text': lab['text']
-                    })
-                elif nearest_seg is not None:
-                    length_pairs.append({
-                        'label_value': lab['value'],
-                        'seg_geom': nearest_seg['geometry'],
-                        'seg_id': getattr(nearest_seg['entity'], 'id', None),
-                        'label_text': lab['text']
-                    })
-
-            return length_pairs, area_pairs
-
-
-        def _check_pairwise_proportions(items, meas_key, label_key, what: str):
-            mismatches = []
-            n = len(items)
-            if n < 2:
-                return mismatches
-            measured = []
-            for it in items:
-                if meas_key == 'length':
-                    mv = it['seg_geom'].length
-                else:
-                    mv = it['poly_geom'].area
-                measured.append(mv)
-
-            for i in range(n):
-                for j in range(i + 1, n):
-                    mi, mj = measured[i], measured[j]
-                    li, lj = items[i][label_key], items[j][label_key]
-                    lhs = mi * lj
-                    rhs = mj * li
-                    denom = max(abs(rhs), 1e-9)
-                    rel_err = abs(lhs - rhs) / denom
-                    if rel_err > self.PROPORTION_REL_TOL:
-                        a_desc = items[i].get('seg_id' if meas_key == 'length' else 'poly_id')
-                        b_desc = items[j].get('seg_id' if meas_key == 'length' else 'poly_id')
-                        a_desc = f"id={a_desc}" if a_desc is not None else "(no id)"
-                        b_desc = f"id={b_desc}" if b_desc is not None else "(no id)"
-                        mismatches.append(
-                            f"{what}: ({a_desc}, label={li:g}) vs ({b_desc}, label={lj:g}) "
-                            f"→ rel. error {rel_err:.3f}"
-                        )
-            return mismatches
-
-        segments = _collect_segments()
-        polygons = _collect_shapes()
-        numeric_labels = _collect_numeric_labels()
-
-        if not numeric_labels:
-            return "N/A", "No numeric labels to check"
-
-        length_pairs, area_pairs = _associate_labels(numeric_labels, segments, polygons)
-
-        issues = []
-        if len(length_pairs) >= 2:
-            issues += _check_pairwise_proportions(
-                [{**p, 'length': p['seg_geom'].length, 'label': p['label_value']} for p in length_pairs],
-                meas_key='length', label_key='label', what="Length proportion mismatch"
-            )
-
-        if len(area_pairs) >= 2:
-            issues += _check_pairwise_proportions(
-                [{**p, 'area': p['poly_geom'].area, 'label': p['label_value']} for p in area_pairs],
-                meas_key='area', label_key='label', what="Area proportion mismatch"
-            )
-
-        if issues:
-            sample = "; ".join(issues[:3])
-            if len(issues) > 3:
-                sample += f" (+{len(issues) - 3} more)"
-            return False, sample
-
-        checked_groups = (len(length_pairs) >= 2) + (len(area_pairs) >= 2)
-        if checked_groups:
-            return True, "Labeled lengths/areas match measured proportions"
-
-        return "N/A", "Not enough labeled pairs to compare proportions"
+    # ------------------------------ Rule-based checks ------------------------------
+    # Mathematical checks (intrinsic geometry/properties)
 
     def core_mathematical_properties_of_shapes_correct(self, ir) -> tuple[bool, str]:
         issues: list[str] = []
         tol = self.DEGENERACY_TOLERANCE
 
+        # 2D primitives: check non-degenerate dimensions/area.
         triangles = [shape for shape in getattr(ir, 'shapes', []) or [] if getattr(shape, 'type', None) == 'triangle']
         for triangle in triangles:
             vertices = (getattr(triangle, 'vertices', []) or [])[:3]
@@ -518,6 +589,7 @@ class Evaluator:
             if radius <= tol:
                 issues.append("Circle radius must be positive")
 
+        # 3D parts: verify corner cardinality and non-zero span in each axis.
         part_vertices: dict = {}
         for shape in getattr(ir, 'shapes', []) or []:
             if getattr(shape, 'type', None) != '3D-part':
@@ -525,7 +597,7 @@ class Evaluator:
             part_id = getattr(shape, 'id', None)
             transform = getattr(shape, 'transform', None)
             raw_vertices = getattr(shape, 'vertices', []) or []
-            transformed = self.transformed_3d_vertices(raw_vertices, transform)
+            transformed = geometry_engine.transformed_3d_vertices(self, raw_vertices, transform)
             if not transformed:
                 transformed = raw_vertices
             key = part_id if part_id is not None else id(shape)
@@ -537,15 +609,15 @@ class Evaluator:
                 issues.append(f"3D-part id={part_id} has no 3D vertices")
                 continue
             rounded = {(
-                round(pt[0], 6),
-                round(pt[1], 6),
-                round(pt[2], 6)
+                round(pt[0], self.COORDINATE_ROUND_DECIMALS),
+                round(pt[1], self.COORDINATE_ROUND_DECIMALS),
+                round(pt[2], self.COORDINATE_ROUND_DECIMALS)
             ) for pt in vertices}
             unique_count = len(rounded)
-            if unique_count < 7:
+            if unique_count < self.THREE_D_PART_MIN_DISTINCT_CORNERS:
                 issues.append(f"3D-part id={part_id} has too few distinct corners ({unique_count})")
                 continue
-            if unique_count > 8:
+            if unique_count > self.THREE_D_PART_MAX_DISTINCT_CORNERS:
                 issues.append(f"3D-part id={part_id} has extra distinct corners ({unique_count})")
                 continue
             xs = [pt[0] for pt in vertices]
@@ -558,13 +630,11 @@ class Evaluator:
                 issues.append(f"3D-part id={part_id} collapses along an axis")
 
         if issues:
-            summary = "; ".join(issues[:3])
-            if len(issues) > 3:
-                summary += f" (+{len(issues) - 3} more)"
-            return False, summary
+            return False, self._summarize_issues(issues)
 
         return True, "Shape parameters are non-degenerate"
 
+    # Spatial/layout checks (placement, overlap, readability, closure)
     def diagram_fully_in_canvas(self, ir) -> bool:
         coordinate_system = getattr(ir, 'tikzpicture_options', None)
 
@@ -573,7 +643,7 @@ class Evaluator:
         clips = getattr(ir, 'clips', []) or []
         for clip in clips:
             clip_transform = getattr(clip, 'transform', None)
-            clip_geom = self.to_geometry(clip, coordinate_system, clip_transform)
+            clip_geom = geometry_engine.to_geometry(self, clip, coordinate_system, clip_transform)
             if clip_geom is None or clip_geom.is_empty:
                 continue
             working_canvas = clip_geom if working_canvas is None else working_canvas.intersection(clip_geom)
@@ -598,7 +668,7 @@ class Evaluator:
         for entity_type, entities in entity_groups:
             for entity in entities:
                 entity_transform = getattr(entity, 'transform', None)
-                geom = self.to_geometry(entity, coordinate_system, entity_transform)
+                geom = geometry_engine.to_geometry(self, entity, coordinate_system, entity_transform)
                 if geom is None or geom.is_empty:
                     continue
                 if not geom.within(working_canvas):
@@ -616,7 +686,7 @@ class Evaluator:
             if not self.clean_latex_text(raw_text):
                 continue
             node_transform = getattr(node, 'transform', None)
-            geom = self.to_geometry(node, coordinate_system, node_transform)
+            geom = geometry_engine.to_geometry(self, node, coordinate_system, node_transform)
             if geom is None or geom.is_empty:
                 continue
             if not geom.within(working_canvas):
@@ -635,22 +705,21 @@ class Evaluator:
 
         # ---------- Helpers & Setup ----------
         def collect_entities(attribute_name, entity_kind):
-            collected_entities = []
-            for entity in getattr(ir, attribute_name, []) or []:
-                if attribute_name == 'arcs':
-                    if (
-                        getattr(entity, 'center', None) is None
-                        or getattr(entity, 'radius', None) is None
-                        or getattr(entity, 'start_angle', None) is None
-                        or getattr(entity, 'end_angle', None) is None
-                    ):
-                        continue
-                transform = getattr(entity, 'transform', None)
-                geometry = self.to_geometry(entity, coordinate_system, transform)
-                if geometry is None or geometry.is_empty:
-                    continue
-                collected_entities.append({'geometry': geometry, 'entity': entity, 'kind': entity_kind})
-            return collected_entities
+            arc_validator = None
+            if attribute_name == 'arcs':
+                arc_validator = lambda entity: (
+                    getattr(entity, 'center', None) is not None
+                    and getattr(entity, 'radius', None) is not None
+                    and getattr(entity, 'start_angle', None) is not None
+                    and getattr(entity, 'end_angle', None) is not None
+                )
+            return self._collect_geometries(
+                ir,
+                coordinate_system,
+                attribute_name,
+                kind=entity_kind,
+                validator=arc_validator,
+            )
 
         shape_entities = collect_entities('shapes', 'shape') + collect_entities('rectangle_primitives', 'rectangle')
         segment_entities = collect_entities('line_segments', 'segment')
@@ -670,7 +739,7 @@ class Evaluator:
                 continue
             label_type = self._classify_label(raw_text, clean_text)
             transform = getattr(node, 'transform', None)
-            geometry = self.to_geometry(node, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, node, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 continue
             label_nodes.append({'geometry': geometry, 'entity': node, 'text': clean_text, 'raw': raw_text, 'label_type': label_type})
@@ -742,7 +811,7 @@ class Evaluator:
                 assignment_description += f" ({', '.join(extra_details)})"
             return assignment_description
 
-        # ---------- main loop: match each label to the best diagram element. ----------
+        # Main loop: classify each label and attach to the best candidate geometry.
         for node in label_nodes:
             label_geometry = node['geometry']
             label_text = node['text']
@@ -839,250 +908,52 @@ class Evaluator:
             labels_associated += 1
 
         if issues:
-            summary = "; ".join(issues[:3])
-            if len(issues) > 3:
-                summary += f" (+{len(issues) - 3} more)"
-            return False, summary
+            return False, self._summarize_issues(issues)
 
-        success_message = f"Labels assigned ({labels_associated} total)"
-        if assignment_summaries:
-            success_message += ": " + "; ".join(assignment_summaries)
-        if tie_notes_messages:
-            tie_summary = "; ".join(tie_notes_messages[:2])
-            if len(tie_notes_messages) > 2:
-                tie_summary += f" (+{len(tie_notes_messages) - 2} more ties)"
-            success_message += f" (ties noted: {tie_summary})"
+        return True, self._build_assignment_success_message(
+            label="Labels assigned",
+            assigned_count=labels_associated,
+            assignments=assignment_summaries,
+            tie_notes=tie_notes_messages,
+        )
 
-        return True, success_message
-
-    PROPORTION_REL_TOL = 0.05
-
+    # Cross-element consistency checks (labeled magnitudes vs measured geometry)
     def labeled_lengths_areas_match_proportions(self, ir) -> tuple[bool, str]:
         coordinate_system = getattr(ir, 'tikzpicture_options', None)
-
-        def _parse_numeric(text: str) -> Optional[float]:
-            cleaned = self.clean_latex_text(text)
-            frac = re.fullmatch(r'\s*(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)\s*', cleaned)
-            if frac:
-                try:
-                    return float(frac.group(1)) / float(frac.group(2))
-                except ZeroDivisionError:
-                    return None
-            m = re.search(r'(\d+(?:\.\d+)?)', cleaned)
-            if not m:
-                return None
-            try:
-                return float(m.group(1))
-            except ValueError:
-                return None
-
-        def _collect_segments():
-            out = []
-            for seg in getattr(ir, 'line_segments', []) or []:
-                geom = self.to_geometry(seg, coordinate_system, getattr(seg, 'transform', None))
-                if geom is None or geom.is_empty:
-                    continue
-                if not isinstance(geom, LineString):
-                    try:
-                        geom = LineString(list(geom.coords))
-                    except Exception:
-                        continue
-                out.append({'entity': seg, 'geometry': geom})
-            return out
-
-        def _collect_shapes():
-            polys = []
-            for shp in getattr(ir, 'shapes', []) or []:
-                geom = self.to_geometry(shp, coordinate_system, getattr(shp, 'transform', None))
-                if geom is None or geom.is_empty:
-                    continue
-                if geom.geom_type == 'Polygon':
-                    polys.append({'entity': shp, 'geometry': geom})
-            for rect in getattr(ir, 'rectangle_primitives', []) or []:
-                geom = self.to_geometry(rect, coordinate_system, getattr(rect, 'transform', None))
-                if geom is None or geom.is_empty:
-                    continue
-                if geom.geom_type == 'Polygon':
-                    polys.append({'entity': rect, 'geometry': geom})
-            return polys
-
-        def _collect_numeric_labels():
-            labels = []
-
-            for node in getattr(ir, 'nodes', []) or []:
-                raw = getattr(node, 'text', '') or ''
-                cleaned = self.clean_latex_text(raw)
-                if not cleaned:
-                    continue
-                if self._classify_label(raw, cleaned) != 'numeric':
-                    continue
-                geom = self.to_geometry(node, coordinate_system, getattr(node, 'transform', None))
-                if geom is None or geom.is_empty:
-                    continue
-                val = _parse_numeric(cleaned)
-                if val is None:
-                    continue
-                labels.append({'entity': node, 'geometry': geom, 'value': val, 'text': cleaned})
-
-            for seg in getattr(ir, 'line_segments', []) or []:
-                seg_geom = self.to_geometry(seg, coordinate_system, getattr(seg, 'transform', None))
-                if seg_geom is None or seg_geom.is_empty:
-                    continue
-
-                for sub in getattr(seg, 'nodes', []) or []:
-                    raw = getattr(sub, 'text', '') or ''
-                    cleaned = self.clean_latex_text(raw)
-                    if not cleaned or self._classify_label(raw, cleaned) != 'numeric':
-                        continue
-                    val = _parse_numeric(cleaned)
-                    if val is None:
-                        continue
-                    geom = self.to_geometry(sub, coordinate_system, getattr(sub, 'transform', None))
-                    if geom is None or geom.is_empty:
-                        mid = seg_geom.interpolate(0.5, normalized=True)
-                        geom = Point(float(mid.x), float(mid.y))
-                    labels.append({'entity': seg, 'geometry': geom, 'value': val, 'text': cleaned})
-
-                for key in ('label', 'text', 'node_text', 'mid_text', 'annotation'):
-                    raw = getattr(seg, key, None)
-                    if not raw:
-                        continue
-                    cleaned = self.clean_latex_text(raw)
-                    if self._classify_label(raw, cleaned) != 'numeric':
-                        continue
-                    val = _parse_numeric(cleaned)
-                    if val is None:
-                        continue
-                    mid = seg_geom.interpolate(0.5, normalized=True)
-                    geom = Point(float(mid.x), float(mid.y))
-                    labels.append({'entity': seg, 'geometry': geom, 'value': val, 'text': cleaned})
-
-            return labels
-
-        def _associate_labels(numeric_labels, segments, polygons):
-            length_pairs, area_pairs = [], []
-
-            SNAP_TO_EDGE_TOL_PT = 12.0
-            AREA_INTERIOR_SHRINK_PT = 2.0
-
-            poly_interiors = []
-            for poly in polygons:
-                interior = poly['geometry'].buffer(-AREA_INTERIOR_SHRINK_PT)
-                if interior.is_empty:
-                    interior = poly['geometry']
-                poly_interiors.append({'geometry': interior, 'entity': poly['entity'], 'orig': poly['geometry']})
-
-            for lab in numeric_labels:
-                pt = lab['geometry'].centroid
-
-                nearest_seg = None
-                nearest_seg_dist = float('inf')
-                for s in segments:
-                    d = pt.distance(s['geometry'])
-                    if d < nearest_seg_dist:
-                        nearest_seg_dist = d
-                        nearest_seg = s
-
-                containing = None
-                for interior in poly_interiors:
-                    if interior['geometry'].covers(pt): 
-                        containing = interior
-                        break
-                
-                # feel free to change if you feel like a diff decision boundary is ebtter,
-                # but i assume: if very close to edge (inside or outside polygon, then length)
-                # if considerably inside polygon, then area
-                # else, length to the nearest segment
-                if nearest_seg is not None and nearest_seg_dist <= SNAP_TO_EDGE_TOL_PT:
-                    length_pairs.append({
-                        'label_value': lab['value'],
-                        'seg_geom': nearest_seg['geometry'],
-                        'seg_id': getattr(nearest_seg['entity'], 'id', None),
-                        'label_text': lab['text']
-                    })
-                elif containing is not None:
-                    area_pairs.append({
-                        'label_value': lab['value'],
-                        'poly_geom': containing['orig'],
-                        'poly_id': getattr(containing['entity'], 'id', None),
-                        'label_text': lab['text']
-                    })
-                elif nearest_seg is not None:
-                    length_pairs.append({
-                        'label_value': lab['value'],
-                        'seg_geom': nearest_seg['geometry'],
-                        'seg_id': getattr(nearest_seg['entity'], 'id', None),
-                        'label_text': lab['text']
-                    })
-
-            return length_pairs, area_pairs
-
-
-        def _check_pairwise_proportions(items, meas_key, label_key, what: str):
-            mismatches = []
-            n = len(items)
-            if n < 2:
-                return mismatches
-            measured = []
-            for it in items:
-                if meas_key == 'length':
-                    mv = it['seg_geom'].length
-                else:
-                    mv = it['poly_geom'].area
-                measured.append(mv)
-
-            for i in range(n):
-                for j in range(i + 1, n):
-                    mi, mj = measured[i], measured[j]
-                    li, lj = items[i][label_key], items[j][label_key]
-                    lhs = mi * lj
-                    rhs = mj * li
-                    denom = max(abs(rhs), 1e-9)
-                    rel_err = abs(lhs - rhs) / denom
-                    if rel_err > self.PROPORTION_REL_TOL:
-                        a_desc = items[i].get('seg_id' if meas_key == 'length' else 'poly_id')
-                        b_desc = items[j].get('seg_id' if meas_key == 'length' else 'poly_id')
-                        a_desc = f"id={a_desc}" if a_desc is not None else "(no id)"
-                        b_desc = f"id={b_desc}" if b_desc is not None else "(no id)"
-                        mismatches.append(
-                            f"{what}: ({a_desc}, label={li:g}) vs ({b_desc}, label={lj:g}) "
-                            f"→ rel. error {rel_err:.3f}"
-                        )
-            return mismatches
-
-        segments = _collect_segments()
-        polygons = _collect_shapes()
-        numeric_labels = _collect_numeric_labels()
+        segments = self._collect_proportion_segments(ir, coordinate_system)
+        polygons = self._collect_proportion_polygons(ir, coordinate_system)
+        numeric_labels = self._collect_numeric_labels_for_proportions(ir, coordinate_system)
 
         if not numeric_labels:
-            return True, "No numeric labels to check"
+            return "N/A", "No numeric labels to check"
 
-        length_pairs, area_pairs = _associate_labels(numeric_labels, segments, polygons)
+        length_pairs, area_pairs = self._associate_numeric_labels_for_proportions(
+            numeric_labels,
+            segments,
+            polygons,
+        )
 
         issues = []
         if len(length_pairs) >= 2:
-            issues += _check_pairwise_proportions(
-                [{**p, 'length': p['seg_geom'].length, 'label': p['label_value']} for p in length_pairs],
+            issues += self._check_pairwise_proportions(
+                [{**p, 'length': p['segment_geometry'].length, 'label': p['label_value']} for p in length_pairs],
                 meas_key='length', label_key='label', what="Length proportion mismatch"
             )
 
         if len(area_pairs) >= 2:
-            issues += _check_pairwise_proportions(
-                [{**p, 'area': p['poly_geom'].area, 'label': p['label_value']} for p in area_pairs],
+            issues += self._check_pairwise_proportions(
+                [{**p, 'area': p['polygon_geometry'].area, 'label': p['label_value']} for p in area_pairs],
                 meas_key='area', label_key='label', what="Area proportion mismatch"
             )
 
         if issues:
-            sample = "; ".join(issues[:3])
-            if len(issues) > 3:
-                sample += f" (+{len(issues) - 3} more)"
-            return False, sample
+            return False, self._summarize_issues(issues)
 
         checked_groups = (len(length_pairs) >= 2) + (len(area_pairs) >= 2)
         if checked_groups:
             return True, "Labeled lengths/areas match measured proportions"
 
-        return True, "Not enough labeled pairs to compare proportions"
+        return "N/A", "Not enough labeled pairs to compare proportions"
     
 
     def diagram_elements_dont_problematically_overlap(self, ir) -> tuple[bool, str]:
@@ -1090,7 +961,7 @@ class Evaluator:
 
         issues: list[str] = []
 
-        # for 3d overlap checks
+        # 3D overlap helpers for depth-aware face/segment comparisons.
         def compute_mean_z(vertices) -> Optional[float]:
             coords_with_z = [coord for coord in vertices if isinstance(coord, (list, tuple)) and len(coord) >= 3]
             if not coords_with_z:
@@ -1109,6 +980,7 @@ class Evaluator:
                 return None
             return tuple(normal / norm)
 
+        # Collect text-bearing nodes first; these are checked against geometry later.
         nodes: list[dict] = []
         for node in getattr(ir, 'nodes', []) or []:
             raw_text = getattr(node, 'text', '') or ''
@@ -1116,7 +988,7 @@ class Evaluator:
             if not cleaned_text:
                 continue
             transform = getattr(node, 'transform', None)
-            geometry = self.to_geometry(node, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, node, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 continue
             nodes.append({
@@ -1132,6 +1004,7 @@ class Evaluator:
         shape_boundaries: list[dict] = []
         three_d_part_boxes = {}
         three_d_part_overlap_pairs = set()
+        # Build shape/face collections used by 2D and 3D overlap logic.
         for shape in getattr(ir, 'shapes', []) or []:
             transform = getattr(shape, 'transform', None)
             if getattr(shape, 'type', None) == 'Ucube':
@@ -1151,18 +1024,18 @@ class Evaluator:
                     'shift': shift_components,
                     'fill': getattr(shape, 'fill', None),
                 })
-                expanded_faces = self.expand_unit_cube_faces(shape, coordinate_system)
+                expanded_faces = geometry_engine.expand_unit_cube_faces(self, shape, coordinate_system)
                 unit_cube_faces.extend(expanded_faces)
                 continue
 
-            geometry = self.to_geometry(shape, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, shape, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 continue
 
             if getattr(shape, 'type', None) == '3D-part':
                 vertices = getattr(shape, 'vertices', []) or []
                 part_id = getattr(shape, 'id', None)
-                transformed_vertices = self.transformed_3d_vertices(vertices, transform)
+                transformed_vertices = geometry_engine.transformed_3d_vertices(self, vertices, transform)
                 if part_id is not None and transformed_vertices:
                     entry = three_d_part_boxes.setdefault(part_id, {
                         'min': [float('inf'), float('inf'), float('inf')],
@@ -1193,7 +1066,7 @@ class Evaluator:
         for cube_face in unit_cube_faces:
             face_geometry = cube_face['geometry']
             parent_cube = cube_face['entity']
-            raw_vertices = cube_face.get('raw_vertices') or self.unit_cube_faces(parent_cube)[cube_face['face']]
+            raw_vertices = cube_face.get('raw_vertices') or geometry_engine.unit_cube_faces(self, parent_cube)[cube_face['face']]
             three_d_faces.append({
                 'geometry': face_geometry,
                 'entity': parent_cube,
@@ -1207,7 +1080,7 @@ class Evaluator:
 
         for rectangle in getattr(ir, 'rectangle_primitives', []) or []:
             transform = getattr(rectangle, 'transform', None)
-            geometry = self.to_geometry(rectangle, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, rectangle, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 continue
             boundary_geometry = geometry.boundary if geometry.geom_type == 'Polygon' else geometry
@@ -1218,7 +1091,7 @@ class Evaluator:
         solid_segments: list[dict] = []
         for segment in getattr(ir, 'line_segments', []) or []:
             transform = getattr(segment, 'transform', None)
-            geometry = self.to_geometry(segment, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, segment, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 continue
             segment_boundaries.append({'geometry': geometry, 'entity': segment})
@@ -1241,7 +1114,7 @@ class Evaluator:
             # skip arcs lacking essential geometry (invalid placeholders)
             if center is None or radius is None or start_angle is None or end_angle is None:
                 continue
-            geometry = self.to_geometry(arc, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, arc, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 continue
             arc_boundaries.append({'geometry': geometry, 'entity': arc})
@@ -1262,7 +1135,10 @@ class Evaluator:
                 continue
             if any(component is None for component in shift[:2]):
                 continue
-            key = (round(shift[0], 6), round(shift[1], 6))
+            key = (
+                round(shift[0], self.COORDINATE_ROUND_DECIMALS),
+                round(shift[1], self.COORDINATE_ROUND_DECIMALS),
+            )
             cube_stacks.setdefault(key, []).append(cube_record)
 
         for location, cubes in cube_stacks.items():
@@ -1297,7 +1173,6 @@ class Evaluator:
 
         # Bounding-box based 3D-part overlap detection
         part_items = sorted(three_d_part_boxes.items())
-        volume_tolerance = 1e-6
         for index, (first_id, first_box) in enumerate(part_items):
             for second_id, second_box in part_items[index + 1:]:
                 overlap_x = min(first_box['max'][0], second_box['max'][0]) - max(first_box['min'][0], second_box['min'][0])
@@ -1310,7 +1185,7 @@ class Evaluator:
                 if overlap_z <= 0:
                     continue
                 overlap_volume = overlap_x * overlap_y * overlap_z
-                if overlap_volume <= volume_tolerance:
+                if overlap_volume <= self.THREE_D_VOLUME_OVERLAP_TOLERANCE:
                     continue
                 pair_key = tuple(sorted((first_id, second_id)))
                 if pair_key in three_d_part_overlap_pairs:
@@ -1359,7 +1234,7 @@ class Evaluator:
                 node_area = node_geometry.area
                 dynamic_area_limit = self.NODE_FACE_BOUNDARY_OVERLAP_AREA_TOLERANCE_PT2
                 if node_area > 0:
-                    dynamic_area_limit = max(dynamic_area_limit, node_area / 3.0)
+                    dynamic_area_limit = max(dynamic_area_limit, node_area / self.NODE_FACE_DYNAMIC_AREA_DIVISOR)
 
                 if (
                     boundary_overlap_area > dynamic_area_limit
@@ -1438,10 +1313,7 @@ class Evaluator:
                     )
 
         if issues:
-            summary = "; ".join(issues[:3])
-            if len(issues) > 3:
-                summary += f" (+{len(issues) - 3} more)"
-            return False, summary
+            return False, self._summarize_issues(issues)
 
         return True, "No problematic overlaps detected"
 
@@ -1458,7 +1330,7 @@ class Evaluator:
 
         for shape in getattr(ir, 'shapes', []) or []:
             transform = getattr(shape, 'transform', None)
-            geometry = self.to_geometry(shape, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, shape, coordinate_system, transform)
             if getattr(shape, 'type', None) == 'Ucube':
                 collect('Ucube', shape, geometry)
             else:
@@ -1466,22 +1338,22 @@ class Evaluator:
 
         for rectangle in getattr(ir, 'rectangle_primitives', []) or []:
             transform = getattr(rectangle, 'transform', None)
-            geometry = self.to_geometry(rectangle, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, rectangle, coordinate_system, transform)
             collect('rectangle', rectangle, geometry)
 
         for circle in getattr(ir, 'circles', []) or []:
             transform = getattr(circle, 'transform', None)
-            geometry = self.to_geometry(circle, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, circle, coordinate_system, transform)
             collect('circle', circle, geometry)
 
         for arc in getattr(ir, 'arcs', []) or []:
             transform = getattr(arc, 'transform', None)
-            geometry = self.to_geometry(arc, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, arc, coordinate_system, transform)
             collect('arc', arc, geometry)
 
         for segment in getattr(ir, 'line_segments', []) or []:
             transform = getattr(segment, 'transform', None)
-            geometry = self.to_geometry(segment, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, segment, coordinate_system, transform)
             collect('line segment', segment, geometry)
 
         for node in getattr(ir, 'nodes', []) or []:
@@ -1489,9 +1361,10 @@ class Evaluator:
             cleaned_text = self.clean_latex_text(getattr(node, 'text', '') or '')
             if not cleaned_text:
                 continue
-            geometry = self.to_geometry(node, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, node, coordinate_system, transform)
             collect('node', node, geometry)
 
+        # Compute an effective canvas scale from the realized geometry bounds.
         if collected_geometries:
             combined = collected_geometries[0][2]
             for kind, _, geom in collected_geometries[1:]:
@@ -1594,7 +1467,7 @@ class Evaluator:
 
         for arc in getattr(ir, 'arcs', []) or []:
             transform = getattr(arc, 'transform', None)
-            geometry = self.to_geometry(arc, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, arc, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 continue
             coords = list(geometry.coords)
@@ -1628,8 +1501,7 @@ class Evaluator:
             last = vertices[-1]
             if len(first) != len(last):
                 return False
-            closure_tolerance = 1e-4
-            return self.distance(first, last) <= closure_tolerance
+            return self.distance(first, last) <= self.SHAPE_CLOSURE_TOLERANCE
 
         three_d_part_planes = {}
 
@@ -1646,7 +1518,7 @@ class Evaluator:
             id_part = f" id={entity_id}" if entity_id is not None else ""
 
             if shape_type == '3D-part' and entity_id is not None:
-                transformed_vertices = self.transformed_3d_vertices(vertices or [], transform)
+                transformed_vertices = geometry_engine.transformed_3d_vertices(self, vertices or [], transform)
                 if transformed_vertices:
                     entry = three_d_part_planes.setdefault(entity_id, {
                         'x_planes': set(),
@@ -1662,22 +1534,22 @@ class Evaluator:
                     xs = [v[0] for v in transformed_vertices]
                     ys = [v[1] for v in transformed_vertices]
                     zs = [v[2] for v in transformed_vertices]
-                    tol = 1e-6
+                    tol = self.DEGENERACY_TOLERANCE
                     if xs:
                         entry['x_max'] = max(entry['x_max'], max(xs))
                         entry['x_min'] = min(entry['x_min'], min(xs))
                         if max(xs) - min(xs) <= tol:
-                            entry['x_planes'].add(round(xs[0], 6))
+                            entry['x_planes'].add(round(xs[0], self.COORDINATE_ROUND_DECIMALS))
                     if ys:
                         entry['y_max'] = max(entry['y_max'], max(ys))
                         entry['y_min'] = min(entry['y_min'], min(ys))
                         if max(ys) - min(ys) <= tol:
-                            entry['y_planes'].add(round(ys[0], 6))
+                            entry['y_planes'].add(round(ys[0], self.COORDINATE_ROUND_DECIMALS))
                     if zs:
                         entry['z_max'] = max(entry['z_max'], max(zs))
                         entry['z_min'] = min(entry['z_min'], min(zs))
                         if max(zs) - min(zs) <= tol:
-                            entry['z_planes'].add(round(zs[0], 6))
+                            entry['z_planes'].add(round(zs[0], self.COORDINATE_ROUND_DECIMALS))
 
             if cycle_flag is not True:
                 if vertices_wrap(vertices):
@@ -1685,7 +1557,7 @@ class Evaluator:
                 issues.append(f"shape{id_part} ({shape_type}) vertices do not wrap to close the outline")
                 continue
 
-            geometry = self.to_geometry(shape, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, shape, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 issues.append(f"shape{id_part} ({shape_type}) could not produce polygon geometry")
                 continue
@@ -1694,7 +1566,8 @@ class Evaluator:
                 issues.append(f"shape{id_part} ({shape_type}) geometry unexpected type {geometry.geom_type}")
                 continue
 
-        plane_tolerance = 1e-4
+        # For 3D parts, ensure front/right/top boundary planes are present at max extents.
+        plane_tolerance = self.THREE_D_PLANE_MATCH_TOLERANCE
         for part_id, data in three_d_part_planes.items():
             missing_faces = []
             if not data['z_planes']:
@@ -1727,13 +1600,11 @@ class Evaluator:
                     issues.append(f"3D-part id={part_id} right face not drawn at max x")
 
         if issues:
-            summary = "; ".join(issues[:3])
-            if len(issues) > 3:
-                summary += f" (+{len(issues) - 3} more)"
-            return False, summary
+            return False, self._summarize_issues(issues)
 
         return True, "All shapes marked closed"
 
+    # Angle-annotation consistency checks (labels and right-angle markers)
     def angle_labels_matches_arcs(self, ir):
         coordinate_system = getattr(ir, 'tikzpicture_options', None)
         arcs = getattr(ir, 'arcs', []) or []
@@ -1742,9 +1613,9 @@ class Evaluator:
         if not arcs and not rectangles:
             return "N/A", "No angle indicators to check"
 
-        axis_vec_info = self._axes_from_coordinate_system(coordinate_system)
+        axis_vec_info = geometry_engine._axes_from_coordinate_system(self, coordinate_system)
         axis_scales = (axis_vec_info[2], axis_vec_info[3])
-        z_vector_base = self._base_z_vector(coordinate_system)
+        z_vector_base = geometry_engine._base_z_vector(self, coordinate_system)
 
         arc_records = self._build_arc_records(arcs, coordinate_system, axis_scales, z_vector_base)
         angle_labels = self._build_angle_label_records(getattr(ir, 'nodes', []) or [], coordinate_system)
@@ -1801,10 +1672,7 @@ class Evaluator:
         issues.extend(right_angle_issues)
 
         if issues:
-            summary = "; ".join(issues[:3])
-            if len(issues) > 3:
-                summary += f" (+{len(issues) - 3} more)"
-            return False, summary
+            return False, self._summarize_issues(issues)
 
         has_angle_labels = bool(angle_labels)
         has_right_angle_symbols = right_angle_count > 0
@@ -1824,7 +1692,7 @@ class Evaluator:
         return True, "; ".join(parts)
 
 
-    # ----------------------------------------------------------------------------- helpers
+    # ----------------------------------------------------------------------------- shared helpers
 
     def distance(self, p1, p2):
         if p1 is None or p2 is None:
@@ -1917,16 +1785,16 @@ class Evaluator:
             if center is None or radius is None or start_angle is None or end_angle is None:
                 continue
             transform = getattr(arc, 'transform', None)
-            geometry = self.to_geometry(arc, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, arc, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 continue
             coords = list(geometry.coords)
             if len(coords) < 2:
                 continue
-            transformed_center = self.apply_transforms([center], coordinate_system, None)[0]
+            transformed_center = geometry_engine.apply_transforms(self, [center], coordinate_system, None)[0]
             transformed_center = (transformed_center[0], transformed_center[1])
             if transform:
-                transformed_center = self.apply_transform_only(
+                transformed_center = geometry_engine.apply_transform_only(self, 
                     [transformed_center],
                     transform,
                     axis_scales,
@@ -1958,7 +1826,7 @@ class Evaluator:
             if self._classify_label(raw_text, cleaned) != 'angle':
                 continue
             transform = getattr(node, 'transform', None)
-            geometry = self.to_geometry(node, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, node, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 continue
             records.append({
@@ -1995,7 +1863,10 @@ class Evaluator:
             return None
         start_vector = (start[0] - center[0], start[1] - center[1])
         end_vector = (end[0] - center[0], end[1] - center[1])
-        if math.hypot(*start_vector) <= 1e-6 or math.hypot(*end_vector) <= 1e-6:
+        if (
+            math.hypot(*start_vector) <= self.DEGENERACY_TOLERANCE
+            or math.hypot(*end_vector) <= self.DEGENERACY_TOLERANCE
+        ):
             return None
         start_angle = math.atan2(start_vector[1], start_vector[0])
         end_angle = math.atan2(end_vector[1], end_vector[0])
@@ -2004,7 +1875,7 @@ class Evaluator:
         dot = start_vector[0] * end_vector[0] + start_vector[1] * end_vector[1]
         denom = math.hypot(*start_vector) * math.hypot(*end_vector)
         minor_deg = None
-        if denom > 1e-9:
+        if denom > self.DENOMINATOR_EPSILON:
             cos_val = max(-1.0, min(1.0, dot / denom))
             minor_deg = math.degrees(math.acos(cos_val))
         return oriented_deg, minor_deg
@@ -2018,7 +1889,7 @@ class Evaluator:
             if len(start) < 2 or len(end) < 2:
                 return
             length = math.hypot(end[0] - start[0], end[1] - start[1])
-            if length <= 1e-6:
+            if length <= self.DEGENERACY_TOLERANCE:
                 return
             edges.append({
                 'geometry': LineString([start, end]),
@@ -2029,7 +1900,7 @@ class Evaluator:
 
         for segment in getattr(ir, 'line_segments', []) or []:
             transform = getattr(segment, 'transform', None)
-            geometry = self.to_geometry(segment, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, segment, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 continue
             coords = list(geometry.coords)
@@ -2038,7 +1909,7 @@ class Evaluator:
 
         for shape in getattr(ir, 'shapes', []) or []:
             transform = getattr(shape, 'transform', None)
-            geometry = self.to_geometry(shape, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, shape, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 continue
             if geometry.geom_type == 'Polygon':
@@ -2054,7 +1925,7 @@ class Evaluator:
             if getattr(rectangle, 'is_right_angle_symbol', False):
                 continue
             transform = getattr(rectangle, 'transform', None)
-            geometry = self.to_geometry(rectangle, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, rectangle, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 continue
             coords = list(geometry.exterior.coords)
@@ -2073,7 +1944,7 @@ class Evaluator:
         issues: list[str] = []
         for symbol in symbols:
             transform = getattr(symbol, 'transform', None)
-            geometry = self.to_geometry(symbol, coordinate_system, transform)
+            geometry = geometry_engine.to_geometry(self, symbol, coordinate_system, transform)
             if geometry is None or geometry.is_empty:
                 issues.append("Right-angle symbol could not produce geometry")
                 continue
@@ -2108,7 +1979,7 @@ class Evaluator:
                 dx = edge_record['end'][0] - edge_record['start'][0]
                 dy = edge_record['end'][1] - edge_record['start'][1]
                 length = math.hypot(dx, dy)
-                if length <= 1e-6:
+                if length <= self.DEGENERACY_TOLERANCE:
                     return None
                 return (dx / length, dy / length)
 
@@ -2178,137 +2049,13 @@ class Evaluator:
         else:
             return (0, 0)
 
-    def get_verticies(self, ir):
-        "get all points where segments meet"
-        verticies = set()
+    def get_vertices(self, ir):
+        "Get all points where segments meet."
+        vertices = set()
 
         if 'segments' in ir:
-            for seg in ir['segments']:
-                verticies.add(tuple(seg['from']))
-                verticies.add(tuple(seg['to']))
+            for segment in ir['segments']:
+                vertices.add(tuple(segment['from']))
+                vertices.add(tuple(segment['to']))
 
-        return list(verticies)
-
-    def visualize_ir(self, ir, output_path="debug_visualization.png"):
-        """
-        Visualize IR and print debugging information about what entities are captured
-        """
-        import matplotlib.pyplot as plt
-
-        canvas_width_pt = self.PAGE_WIDTH_IN * self.UNIT_TO_PT["in"]
-        canvas_height_pt = self.PAGE_HEIGHT_IN * self.UNIT_TO_PT["in"]
-        canvas_width_in = self.PAGE_WIDTH_IN
-        canvas_height_in = self.PAGE_HEIGHT_IN
-        fig, ax = plt.subplots(1, 1, figsize=(canvas_width_in, canvas_height_in))
-
-        coordinate_system = getattr(ir, 'tikzpicture_options', None)
-
-        self._debug("=== IR DEBUGGING INFO ===")
-        self._debug(
-            f"Page reference dimensions: {canvas_width_pt:.1f} x {canvas_height_pt:.1f} pt "
-            f"({canvas_width_in:.1f} x {canvas_height_in:.1f} in)"
-        )
-        self._debug(f"Coordinate system: {coordinate_system}")
-
-        # draw canvas bounds
-        if self.enforce_page_bounds and self._page_canvas is not None:
-            x, y = self._page_canvas.exterior.xy
-            ax.plot(x, y, 'red', linewidth=2, label='Canvas')
-
-        # draw clips
-        clips = getattr(ir, 'clips', []) or []
-        for i, clip in enumerate(clips):
-            clip_transform = getattr(clip, 'transform', None)
-            clip_geom = self.to_geometry(clip, coordinate_system, clip_transform)
-            if clip_geom.geom_type == 'Polygon':
-                x, y = clip_geom.exterior.xy
-                ax.plot(x, y, 'orange', linewidth=2, label=f'Clip {i}')
-
-        entities = [
-            ('shapes', getattr(ir, 'shapes', []) or [], 'blue'),
-            ('rectangle_primitives', getattr(ir, 'rectangle_primitives', []) or [], 'green'),
-            ('circles', getattr(ir, 'circles', []) or [], 'purple'),
-            ('line_segments', getattr(ir, 'line_segments', []) or [], 'brown'),
-            ('nodes', getattr(ir, 'nodes', []) or [], 'pink'),
-            ('arcs', getattr(ir, 'arcs', []) or [], 'cyan'),
-        ]
-
-        # print captured entities 
-        for entity_type, entity_list, color in entities:
-            self._debug(f"{entity_type}: {len(entity_list)} entities")
-            if self.debug:
-                for i, entity in enumerate(entity_list):
-                    self._debug(f"  [{i}] {entity}")
-
-        self._debug("\n=== SHAPELY GEOMETRY CONVERSION ===")
-        for entity_type, entity_list, color in entities:
-            for j, entity in enumerate(entity_list):
-                entity_transform = getattr(entity, 'transform', None)
-                try:
-                    if getattr(entity, 'type', None) == 'Ucube':
-                        expanded_faces = self.expand_unit_cube_faces(entity, coordinate_system)
-                        for face_index, face in enumerate(expanded_faces):
-                            geom = face['geometry']
-                            self._debug(f"{entity_type}[{j}] face[{face_index}] ({face['face']}): {geom.geom_type}")
-                            bounds = geom.bounds
-                            width_pt = bounds[2] - bounds[0]
-                            height_pt = bounds[3] - bounds[1]
-                            area_pt2 = geom.area if hasattr(geom, 'area') else 0
-                            self._debug(
-                                f"  Bounds: ({bounds[0]:.1f}, {bounds[1]:.1f}) to ({bounds[2]:.1f}, {bounds[3]:.1f}) pt"
-                            )
-                            self._debug(f"  Size: {width_pt:.1f} x {height_pt:.1f} pt")
-                            if area_pt2 > 0:
-                                self._debug(f"  Area: {area_pt2:.1f} pt²")
-                            if geom.geom_type == 'Polygon':
-                                x, y = geom.exterior.xy
-                                face_alpha = 0.35 if face.get('face') == 'top' else 0.2
-                                ax.plot(x, y, color, linewidth=1.1, alpha=0.8)
-                                ax.fill(x, y, color, alpha=face_alpha)
-                            elif geom.geom_type == 'LineString':
-                                x, y = geom.xy
-                                ax.plot(x, y, color, linewidth=1)
-                        continue
-
-                    geom = self.to_geometry(entity, coordinate_system, entity_transform)
-
-                    # print geometry info
-                    bounds = geom.bounds  # (minx, miny, maxx, maxy)
-                    width_pt = bounds[2] - bounds[0]
-                    height_pt = bounds[3] - bounds[1]
-                    area_pt2 = geom.area if hasattr(geom, 'area') else 0
-
-                    self._debug(f"{entity_type}[{j}]: {geom.geom_type}")
-                    self._debug(
-                        f"  Bounds: ({bounds[0]:.1f}, {bounds[1]:.1f}) to ({bounds[2]:.1f}, {bounds[3]:.1f}) pt"
-                    )
-                    self._debug(f"  Size: {width_pt:.1f} x {height_pt:.1f} pt")
-                    if area_pt2 > 0:
-                        self._debug(f"  Area: {area_pt2:.1f} pt²")
-                    if entity_type == 'nodes':
-                        self._debug(f"  Text: '{entity.text}'")
-                    if self.debug:
-                        self._debug("")
-
-                    if geom.geom_type == 'Polygon':
-                        x, y = geom.exterior.xy
-                        ax.plot(x, y, color, linewidth=1, alpha=0.7)
-                        ax.fill(x, y, color, alpha=0.2)
-                    elif geom.geom_type == 'LineString':
-                        x, y = geom.xy
-                        ax.plot(x, y, color, linewidth=1)
-                    elif geom.geom_type == 'Point':
-                        ax.plot(geom.x, geom.y, 'o', color=color, markersize=4)
-
-                except Exception as e:
-                    self._debug(f"Error visualizing {entity_type}[{j}]: {e}")
-
-        ax.set_aspect('equal')
-        ax.legend()
-        ax.set_title('What Evaluator Sees')
-        ax.grid(True, alpha=0.3)
-
-        # plt.savefig(output_path, dpi=150, bbox_inches='tight')
-        plt.show()
-        # print(f"Visualization saved to {output_path}")
-        self._debug("=== END IR DEBUGGING INFO ===")
+        return list(vertices)

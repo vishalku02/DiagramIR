@@ -47,4 +47,4 @@ py-modules = [
 include = ["utils*"]
 
 [tool.setuptools.package-data]
-utils = ["prompt_llmasjudge_*.md", "prompt_backtranslation.md"]
+utils.prompts = ["*.md"]

@@ -1,6 +1,9 @@
 """Precompute PNG renders for TikZ diagrams referenced in the judge dataset."""
 
 import csv
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -9,12 +12,53 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backtranslation import compile_tikz
-
 DATA_CSV = Path("data/geometric_shapes_test_set.csv")
 PNG_DIR = Path("data/judge_pngs")
 
 PNG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def compile_tikz(code: str, output_path: Path, output_format: str = "png") -> bool:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = output_path.with_suffix(".tex")
+    temp_path.write_text(code, encoding="utf-8")
+    temp_dir = output_path.parent
+
+    for fname in ("IMlongdivision.sty", "Tikz-IM.sty", "Tikz-IM-ES.sty", "IM.cls"):
+        src = ROOT / "styles" / fname
+        if src.exists():
+            shutil.copy(src, temp_dir / fname)
+
+    latex_engine = os.environ.get("LATEX_ENGINE", "lualatex")
+    imagemagick_bin = os.environ.get("IMAGEMAGICK_BIN", "magick")
+    dvisvgm_bin = os.environ.get("DVISVGM_BIN", "dvisvgm")
+
+    try:
+        subprocess.run(
+            [latex_engine, "-interaction=nonstopmode", "-output-directory", str(temp_dir), str(temp_path)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        pdf_path = temp_path.with_suffix(".pdf")
+
+        if output_format.lower() == "svg":
+            subprocess.run(
+                [dvisvgm_bin, "--pdf", str(pdf_path), "-o", str(output_path)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.run(
+                [imagemagick_bin, "-density", "300", str(pdf_path), str(output_path)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
 
 def process_csv(

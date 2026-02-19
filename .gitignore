@@ -206,3 +206,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# DiagramIR generated artifacts
+data/judge_pngs/
+results/backtranslation/cache/
+results/llm_judge/cache/
+results/llm_judge/both/
+results/llm_judge/code/
+results/llm_judge/image/
