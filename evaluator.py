@@ -11,7 +11,7 @@ import os
 from typing import Optional
 import numpy as np
 
-from geometry_engine import (
+from utils.geometry_engine import (
     _axes_from_coordinate_system,
     _base_z_vector,
     _dimension_to_pt,
@@ -38,7 +38,7 @@ from geometry_engine import (
     transformed_3d_vertices,
 )
 
-from IR_model import TikzIR
+from utils.ir_schema import TikzIR
 
 class Evaluator:
     """

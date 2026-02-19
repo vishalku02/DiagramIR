@@ -1,16 +1,17 @@
 """LLM-as-Judge prompt loader."""
 from __future__ import annotations
 
-from pathlib import Path
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, Optional
 
 PromptMode = Literal["image", "code", "both"]
+_PROMPT_ROOT = Path(__file__).resolve().parent
 
 _PROMPT_FILES = {
-    "image": Path("prompt_llmasjudge_imageonly.txt"),
-    "code": Path("prompt_llmasjudge_codeonly.txt"),
-    "both": Path("prompt_llmasjudge_both.txt"),
+    "image": _PROMPT_ROOT / "prompt_llmasjudge_imageonly.md",
+    "code": _PROMPT_ROOT / "prompt_llmasjudge_codeonly.md",
+    "both": _PROMPT_ROOT / "prompt_llmasjudge_both.md",
 }
 
 @lru_cache(maxsize=None)
@@ -25,7 +26,7 @@ def load_prompt(mode: PromptMode) -> str:
 
 
 def available_modes() -> tuple[PromptMode, ...]:
-    return tuple(_PROMPT_FILES.keys())  # type: ignore[return-value]
+    return ("image", "code", "both")
 
 
 def build_prompt(

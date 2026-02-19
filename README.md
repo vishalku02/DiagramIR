@@ -2,14 +2,20 @@
 
 Experiment code for **DiagramIR: An Automatic Evaluation Pipeline for Educational Math Diagrams**.
 
-DiagramIR is a scalable and reliable method for automatic evaluation of geometric figures. It uses as a language model to translate diagram code into an *intermediate representaiton (IR)*,a standardized, structured format where rule-based checks can be applied against the key geometric and mathemtical constraints of the figure. 
+DiagramIR is a scalable and reliable method for automatic evaluation of geometric figures. It uses a language model to translate diagram code into an *intermediate representation (IR)*, a standardized, structured format where rule-based checks can be applied against the key geometric and mathematical constraints of the figure.
 This approach achieves higher agreement with human raters (Cohen’s K) and enables smaller models, such as GPT-4.1 Mini, to perform on par with larger frontier models like GPT-5—at nearly 10x lower inference cost.
+
+## Notebook Workflow
+Run the two evaluation notebooks first, then the analysis notebook to compare results:
+1. `notebooks/backtranslation_evaluation.ipynb`
+2. `notebooks/llm_judge_evaluation.ipynb`
+3. `notebooks/backtranslation_analysis.ipynb`
 
 ## Requirements
 
-- **ImageMagick** (`magick` CLI) 
-- **TeX distribution** with `lualatex` and `dvisvgm` 
-- Optional: [uv](https://docs.astral.sh/uv/) fßor environment management.
+- **ImageMagick** (`magick` CLI)
+- **TeX distribution** with `lualatex` and `dvisvgm`
+- Optional: [uv](https://docs.astral.sh/uv/) for environment management.
 
 Verify the system tools are on your `PATH`:
 
@@ -45,15 +51,17 @@ cp .env.example .env
 Required entries:
 
 - `OPENAI_API_KEY`, `OPENAI_MODEL`
-- `TORCH_DEVICE`, `MAX_CONCURRENCY` 
+- `TORCH_DEVICE`, `MAX_CONCURRENCY`
 
 ## Repository Layout
 
-- `backtranslation.py` – TikZ → IR extraction helpers (includes `compile_tikz`).
-- `evaluator.py` – Rule-based checks applied to the extracted IR.
-- `geometry_engine.py`, `IR_model.py` – Geometry helpers and Pydantic schema for the IR.
-- `scripts/` – Utilities for cache cleanup, CSV normalization, and judge rendering.
-- `notebooks/` – Backtranslation experiment and analysis notebooks.
+- Root entry modules:
+  - `backtranslation.py` – TikZ → IR extraction helpers (includes `compile_tikz`).
+  - `llm_judge.py` – LLM-as-Judge evaluation harness.
+  - `evaluator.py` – Rule-based checks applied to extracted IR.
+- `utils/` – Internal schemas, geometry utilities, model wrappers, and judge prompts.
+- `scripts/` – Utilities for cache cleanup and judge rendering.
+- `notebooks/` – Notebook-first execution and analysis surface.
 - `data/` – Benchmark prompts and human annotation CSVs.
 - `results/` – Cached model outputs and evaluation results.
 
@@ -62,20 +70,19 @@ Required entries:
 ### Backtranslation Workflow
 
 - Run `notebooks/backtranslation_evaluation.ipynb` to generate model IR extractions and populate `results/backtranslation/`.
-- Run `notebooks/backtranslation_analysis.ipynb` to compute human agreement and cost and time metrics. 
+- Run `notebooks/backtranslation_analysis.ipynb` to compare approaches and compute agreement, cost, and timing metrics.
 
 ### LLM-as-Judge Workflow
 
-- Pre-render judge PNGs if you need image inputs:
+- Run `notebooks/llm_judge_evaluation.ipynb` for the notebook-first judge execution path.
+- Optional: pre-render judge PNGs if you need image inputs:
   ```bash
   python scripts/precompute_judge_pngs.py
   ```
   Requires `magick`, `lualatex`, and `dvisvgm`.
 
-- Ensure `data/geometric_shapes_test_set.csv` (or your chosen dataset) includes `diagram_id`, TikZ, and optional PNG paths.
-- Adjust `llm_judge.py` to list the models, prompt mode (`code`, `image`, or `both`), and concurrency you want.
-- Launch the evaluation:
+- Optional CLI (secondary to notebooks):
   ```bash
-  python llm_judge.py
+  python llm_judge.py --csv data/geometric_shapes_test_set.csv --mode both --models gpt-4.1-mini --limit 10
   ```
   Results will appear under `results/llm_judge/<mode>/<model>/diagram_*.json`.
