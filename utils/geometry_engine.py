@@ -29,10 +29,10 @@ def to_pt(self, value, unit: str = "pt") -> float:
     "convert a value into TeX pt"
     if isinstance(value, str):
         # expand IM macros first
-        expanded_value = self.expand_macros(value.strip())
+        expanded_value = expand_macros(self, value.strip())
 
         try:
-            return self._eval_simple_expression(expanded_value)
+            return _eval_simple_expression(self, expanded_value)
         except ValueError:
             pass
 
@@ -133,10 +133,10 @@ def unit_cube_faces(self, cube):
 
 def expand_unit_cube_faces(self, cube, coordinate_system):
     faces = []
-    raw_faces = self.unit_cube_faces(cube)
+    raw_faces = unit_cube_faces(self, cube)
     transform = getattr(cube, 'transform', None)
     for face_name, vertices in raw_faces.items():
-        projected = self.apply_transforms(vertices, coordinate_system, transform)
+        projected = apply_transforms(self, vertices, coordinate_system, transform)
         faces.append({
             'geometry': Polygon(projected),
             'entity': cube,
@@ -157,7 +157,7 @@ def _eval_simple_expression(self, expr: str) -> float:
     if not tokens:
         raise ValueError("Invalid expression")
 
-    value = self._parse_simple_term(tokens[0])
+    value = _parse_simple_term(self, tokens[0])
     i = 1
     while i < len(tokens):
         op = tokens[i]
@@ -165,7 +165,7 @@ def _eval_simple_expression(self, expr: str) -> float:
             raise ValueError("Unsupported operator")
         if i + 1 >= len(tokens):
             raise ValueError("Trailing operator")
-        rhs = self._parse_simple_term(tokens[i + 1])
+        rhs = _parse_simple_term(self, tokens[i + 1])
         if op == '*':
             value *= rhs
         else:
@@ -183,7 +183,7 @@ def _shift_to_units(self, value, axis_base_scale):
     if isinstance(value, str):
         if axis_base_scale == 0:
             return 0.0
-        return self.to_pt(value) / axis_base_scale
+        return to_pt(self, value) / axis_base_scale
 
     return float(value)
 
@@ -210,10 +210,10 @@ def _parse_axis_vector(self, spec, default_angle_deg):
                     angle_deg = float(default_angle_deg)
                 length_expr = length_str.strip().strip('{}').strip()
                 try:
-                    base_length = float(self.to_pt(length_expr))
+                    base_length = float(to_pt(self, length_expr))
                 except ValueError:
                     try:
-                        base_length = float(self._eval_simple_expression(length_expr))
+                        base_length = float(_eval_simple_expression(self, length_expr))
                     except Exception:
                         # if still unresolved (e.g. macro like \unitLength), fall back to 1 cm
                         warnings.warn(
@@ -223,10 +223,10 @@ def _parse_axis_vector(self, spec, default_angle_deg):
                         base_length = float(self.UNIT_TO_PT["cm"])
             elif '*' in token:
                 try:
-                    base_length = float(self._eval_simple_expression(token))
+                    base_length = float(_eval_simple_expression(self, token))
                 except Exception:
                     try:
-                        base_length = float(self.to_pt(token))
+                        base_length = float(to_pt(self, token))
                     except Exception:
                         warnings.warn(
                             f"Unsupported axis expression '{token}', using 1cm fallback",
@@ -236,10 +236,10 @@ def _parse_axis_vector(self, spec, default_angle_deg):
             else:
                 token_expr = token
                 try:
-                    base_length = float(self.to_pt(token_expr))
+                    base_length = float(to_pt(self, token_expr))
                 except ValueError:
                     try:
-                        base_length = float(self._eval_simple_expression(token_expr))
+                        base_length = float(_eval_simple_expression(self, token_expr))
                     except Exception:
                         warnings.warn(
                             f"Unsupported axis token '{token_expr}', using 1cm fallback",
@@ -247,7 +247,7 @@ def _parse_axis_vector(self, spec, default_angle_deg):
                         )
                         base_length = float(self.UNIT_TO_PT["cm"])
         else:
-            base_length = float(self.to_pt(value))
+            base_length = float(to_pt(self, value))
 
     angle_rad = np.radians(angle_deg)
     vec_x = base_length * np.cos(angle_rad)
@@ -263,8 +263,8 @@ def _axes_from_coordinate_system(self, coordinate_system):
     x_spec = getattr(coordinate_system, 'x', None) if coordinate_system else None
     y_spec = getattr(coordinate_system, 'y', None) if coordinate_system else None
 
-    x_vec, x_mag = self._parse_axis_vector(x_spec, 0.0)
-    y_vec, y_mag = self._parse_axis_vector(y_spec, 90.0)
+    x_vec, x_mag = _parse_axis_vector(self, x_spec, 0.0)
+    y_vec, y_mag = _parse_axis_vector(self, y_spec, 90.0)
 
     scale_val = getattr(coordinate_system, 'scale', None) if coordinate_system else None
     if scale_val is not None:
@@ -299,7 +299,7 @@ def _base_z_vector(self, coordinate_system):
         def _convert_component(val):
             if isinstance(val, str):
                 try:
-                    return self.to_pt(val.strip())
+                    return to_pt(self, val.strip())
                 except Exception:
                     return float(val)
             return float(val)
@@ -320,7 +320,7 @@ def _base_z_vector(self, coordinate_system):
 
                 if re.match(r".*[a-zA-Z]", length_token):
                     try:
-                        length_pt = self.to_pt(length_token)
+                        length_pt = to_pt(self, length_token)
                     except ValueError:
                         warnings.warn(
                             f"Unsupported z length expression '{length_token}', using 1cm fallback",
@@ -328,12 +328,12 @@ def _base_z_vector(self, coordinate_system):
                         )
                         length_pt = self.UNIT_TO_PT["cm"]
                 else:
-                    length_value = self._eval_simple_expression(length_token)
+                    length_value = _eval_simple_expression(self, length_token)
                     coord_scale = self.UNIT_TO_PT["cm"]
                     if getattr(coordinate_system, 'x', None):
-                        _, coord_scale = self._parse_axis_vector(coordinate_system.x, 0.0)
+                        _, coord_scale = _parse_axis_vector(self, coordinate_system.x, 0.0)
                     elif getattr(coordinate_system, 'y', None):
-                        _, coord_scale = self._parse_axis_vector(coordinate_system.y, 90.0)
+                        _, coord_scale = _parse_axis_vector(self, coordinate_system.y, 90.0)
                     length_pt = length_value * coord_scale
 
                 z_x = length_pt * np.cos(np.radians(angle))
@@ -349,7 +349,7 @@ def _base_z_vector(self, coordinate_system):
                     raise ValueError(f"Invalid z coordinate pair format: {z_spec}")
             else:
                 try:
-                    length_pt = self.to_pt(token)
+                    length_pt = to_pt(self, token)
                 except ValueError:
                     warnings.warn(
                         f"Unsupported z token '{token}', using 1cm fallback",
@@ -384,7 +384,7 @@ def _dimension_to_pt(self, value):
         return 0.0
 
     if isinstance(value, str):
-        return self.to_pt(value)
+        return to_pt(self, value)
 
     return float(value)
 
@@ -398,8 +398,8 @@ def build_transformation_matrix(self, coordinate_system, transform):
                        [0.0, 1.0, 0.0],
                        [0.0, 0.0, 1.0]])
 
-    x_vec, y_vec, axis_base_x, axis_base_y = self._axes_from_coordinate_system(coordinate_system)
-    z_vector_base = self._base_z_vector(coordinate_system)
+    x_vec, y_vec, axis_base_x, axis_base_y = _axes_from_coordinate_system(self, coordinate_system)
+    z_vector_base = _base_z_vector(self, coordinate_system)
 
     axis_matrix = np.array([[x_vec[0], y_vec[0], 0.0],
                             [x_vec[1], y_vec[1], 0.0],
@@ -446,19 +446,19 @@ def build_transformation_matrix(self, coordinate_system, transform):
         if getattr(transform, 'shift', None):
             shift_vals = transform.shift
             if len(shift_vals) >= 1:
-                shift_units_x += self._shift_to_units(shift_vals[0], axis_base_x)
+                shift_units_x += _shift_to_units(self, shift_vals[0], axis_base_x)
             if len(shift_vals) >= 2:
-                shift_units_y += self._shift_to_units(shift_vals[1], axis_base_y)
+                shift_units_y += _shift_to_units(self, shift_vals[1], axis_base_y)
             if len(shift_vals) >= 3:
-                shift_units_z += self._shift_to_units(shift_vals[2], axis_base_x)
+                shift_units_z += _shift_to_units(self, shift_vals[2], axis_base_x)
 
         if getattr(transform, 'xshift', None):
             if axis_base_x != 0.0:
-                shift_units_x += self._dimension_to_pt(transform.xshift) / axis_base_x
+                shift_units_x += _dimension_to_pt(self, transform.xshift) / axis_base_x
 
         if getattr(transform, 'yshift', None):
             if axis_base_y != 0.0:
-                shift_units_y += self._dimension_to_pt(transform.yshift) / axis_base_y
+                shift_units_y += _dimension_to_pt(self, transform.yshift) / axis_base_y
 
         delta_xy = linear_part @ np.array([shift_units_x, shift_units_y], dtype=float)
 
@@ -538,9 +538,9 @@ def apply_transforms(self, coords, coordinate_system, transform):
                 if isinstance(val, str):
                     # try to evaluate macro expressions like "-\\HP/2"
                     try:
-                        expanded_val = self.expand_macros(val)
+                        expanded_val = expand_macros(self, val)
                         # use to_pt to parse and evaluate the expression
-                        expanded_coord.append(self.to_pt(expanded_val))
+                        expanded_coord.append(to_pt(self, expanded_val))
                     except Exception:
                         expanded_coord.append(float(val))
                 else:
@@ -550,16 +550,16 @@ def apply_transforms(self, coords, coordinate_system, transform):
             expanded_coords.append(coord)
 
     # build transformation matrix
-    matrix, meta = self.build_transformation_matrix(coordinate_system, transform)
+    matrix, meta = build_transformation_matrix(self, coordinate_system, transform)
     self._debug(f"transformation matrix:\n{matrix}")
 
     # apply matrix to coordinates
-    out = self.apply_matrix_transform(expanded_coords, matrix)
+    out = apply_matrix_transform(self, expanded_coords, matrix)
 
     # project 3d to 2d if any 3d points are present
     if any(len(point) == 3 for point in coords):
         coords_3d = [(point[0], point[1], point[2]) if len(point) == 3 else (point[0], point[1], 0) for point in out]
-        out = self.project_3d_to_2d(coords_3d, coordinate_system, meta)
+        out = project_3d_to_2d(self, coords_3d, coordinate_system, meta)
 
     return out
 
@@ -578,7 +578,7 @@ def apply_transform_only(self, coords, transform, axis_scales=None, z_vector_bas
     axis_base_x, axis_base_y = axis_scales
 
     if z_vector_base is None:
-        z_vector_base = self._base_z_vector(None)
+        z_vector_base = _base_z_vector(self, None)
 
     matrix = np.array([[1.0, 0.0, 0.0],
                        [0.0, 1.0, 0.0],
@@ -624,19 +624,19 @@ def apply_transform_only(self, coords, transform, axis_scales=None, z_vector_bas
         if getattr(transform, 'shift', None):
             shift_vals = transform.shift
             if len(shift_vals) >= 1:
-                shift_units_x += self._shift_to_units(shift_vals[0], axis_base_x)
+                shift_units_x += _shift_to_units(self, shift_vals[0], axis_base_x)
             if len(shift_vals) >= 2:
-                shift_units_y += self._shift_to_units(shift_vals[1], axis_base_y)
+                shift_units_y += _shift_to_units(self, shift_vals[1], axis_base_y)
             if len(shift_vals) >= 3:
-                shift_units_z += self._shift_to_units(shift_vals[2], axis_base_x)
+                shift_units_z += _shift_to_units(self, shift_vals[2], axis_base_x)
 
         if getattr(transform, 'xshift', None):
             if axis_base_x != 0.0:
-                shift_units_x += self._dimension_to_pt(transform.xshift) / axis_base_x
+                shift_units_x += _dimension_to_pt(self, transform.xshift) / axis_base_x
 
         if getattr(transform, 'yshift', None):
             if axis_base_y != 0.0:
-                shift_units_y += self._dimension_to_pt(transform.yshift) / axis_base_y
+                shift_units_y += _dimension_to_pt(self, transform.yshift) / axis_base_y
 
         shift_local_xy = np.array([shift_units_x * axis_base_x, shift_units_y * axis_base_y], dtype=float)
         delta_xy = linear_part @ shift_local_xy
@@ -658,7 +658,7 @@ def apply_transform_only(self, coords, transform, axis_scales=None, z_vector_bas
                                     [0.0, 0.0, 1.0]], dtype=float)
             matrix = shift_matrix @ matrix
 
-    return self.apply_matrix_transform(coords, matrix)
+    return apply_matrix_transform(self, coords, matrix)
 
 
 def generate_arc_geometry(self, center, start_angle, end_angle, radius, num_segments=100):
@@ -674,11 +674,11 @@ def generate_arc_geometry(self, center, start_angle, end_angle, radius, num_segm
 
 def project_3d_to_2d(self, coords_3d, coordinate_system, meta=None):
     if meta is not None:
-        z_vector_base = meta.get('z_vector_base', self._base_z_vector(coordinate_system))
+        z_vector_base = meta.get('z_vector_base', _base_z_vector(self, coordinate_system))
         scale_factors = meta.get('scale_factors', (1.0, 1.0, 1.0))
         scale_factor_z = scale_factors[2]
     else:
-        z_vector_base = self._base_z_vector(coordinate_system)
+        z_vector_base = _base_z_vector(self, coordinate_system)
         scale_factor_z = 1.0
 
     z_x = z_vector_base[0] * scale_factor_z
@@ -711,14 +711,14 @@ def rotate_point_around_center(self, point: tuple[float, float], angle_deg: floa
 def to_geometry(self, entity, coordinate_system=None, transform=None):
     "convert an entity to a shapely geometry w/ tikzpicture options and transforms applied"
 
-    axis_vec_info = self._axes_from_coordinate_system(coordinate_system)
+    axis_vec_info = _axes_from_coordinate_system(self, coordinate_system)
     axis_scales = (axis_vec_info[2], axis_vec_info[3])
-    z_vector_base = self._base_z_vector(coordinate_system)
+    z_vector_base = _base_z_vector(self, coordinate_system)
 
     # handle unit cubes
     if getattr(entity, 'type', None) == 'Ucube':
-        vertices = self.unit_cube_vertices(entity)
-        projected_vertices = self.apply_transforms(vertices, coordinate_system, transform)
+        vertices = unit_cube_vertices(self, entity)
+        projected_vertices = apply_transforms(self, vertices, coordinate_system, transform)
         return MultiPoint(projected_vertices).convex_hull
 
     # handle clips
@@ -726,13 +726,13 @@ def to_geometry(self, entity, coordinate_system=None, transform=None):
         def _normalize_clip_corner(corner):
             if isinstance(corner, str):
                 if corner in self.IM_MACROS:
-                    macro_value = self.to_pt(self.IM_MACROS[corner])
+                    macro_value = to_pt(self, self.IM_MACROS[corner])
                     return [macro_value, macro_value]
                 token = corner.strip()
                 if token.startswith('(') and token.endswith(')'):
                     parts = token[1:-1].split(',')
                     if len(parts) == 2:
-                        return [self.to_pt(parts[0].strip()), self.to_pt(parts[1].strip())]
+                        return [to_pt(self, parts[0].strip()), to_pt(self, parts[1].strip())]
                 raise ValueError(f"Unknown IM macro: {corner}")
             return corner
 
@@ -750,7 +750,7 @@ def to_geometry(self, entity, coordinate_system=None, transform=None):
             return None
 
         coords = [corner1, corner2]
-        coords = self.apply_transforms(coords, coordinate_system, transform)
+        coords = apply_transforms(self, coords, coordinate_system, transform)
         (x1, y1), (x2, y2) = coords
         return Polygon([(x1, y1), (x2, y1), (x2, y2), (x1, y2)])
 
@@ -761,7 +761,7 @@ def to_geometry(self, entity, coordinate_system=None, transform=None):
 
         # first apply unit conversion
         coords = [entity.corner1, entity.corner2]
-        coords_with_units = self.apply_transforms(coords, coordinate_system, None)
+        coords_with_units = apply_transforms(self, coords, coordinate_system, None)
         (x1, y1), (x2, y2) = coords_with_units
 
         self._debug(f"rectangle after unit conversion: ({x1}, {y1}), ({x2}, {y2})")
@@ -782,7 +782,7 @@ def to_geometry(self, entity, coordinate_system=None, transform=None):
 
         # now apply any remaining transforms (rotation, shifts)
         if transform:
-            all_corners = self.apply_transform_only(all_corners, transform, axis_scales, z_vector_base)
+            all_corners = apply_transform_only(self, all_corners, transform, axis_scales, z_vector_base)
 
         self._debug(f"rectangle corners after all transforms: {all_corners}")
 
@@ -791,11 +791,11 @@ def to_geometry(self, entity, coordinate_system=None, transform=None):
     # shapes
     elif hasattr(entity, 'vertices'):
         # Stage 1: apply coordinate system transforms only
-        coords_with_units = self.apply_transforms(entity.vertices, coordinate_system, None)
+        coords_with_units = apply_transforms(self, entity.vertices, coordinate_system, None)
 
         # Stage 2: apply entity transforms if present
         if transform:
-            coords_with_units = self.apply_transform_only(coords_with_units, transform, axis_scales, z_vector_base)
+            coords_with_units = apply_transform_only(self, coords_with_units, transform, axis_scales, z_vector_base)
 
         if getattr(entity, 'cycle', False):
             return Polygon(coords_with_units)
@@ -805,22 +805,22 @@ def to_geometry(self, entity, coordinate_system=None, transform=None):
     # arcs
     elif hasattr(entity, 'center') and hasattr(entity, 'start_angle'):
         # Stage 1: apply coordinate system transforms to center
-        center_with_units = self.apply_transforms([entity.center], coordinate_system, None)[0]
+        center_with_units = apply_transforms(self, [entity.center], coordinate_system, None)[0]
 
         # Stage 1: scale radius by coordinate system only
         radius = entity.radius
         if isinstance(radius, str):
-            radius_expr = self.expand_macros(radius)
+            radius_expr = expand_macros(self, radius)
             try:
-                radius = self.to_pt(radius_expr)
+                radius = to_pt(self, radius_expr)
             except Exception:
-                radius = float(self._eval_simple_expression(radius_expr))
+                radius = float(_eval_simple_expression(self, radius_expr))
         axis_mag_x, axis_mag_y = axis_scales
         radius *= (axis_mag_x + axis_mag_y) / 2.0
 
         # Stage 2: apply entity transforms
         if transform:
-            center_transformed = self.apply_transform_only([center_with_units], transform, axis_scales, z_vector_base)[0]
+            center_transformed = apply_transform_only(self, [center_with_units], transform, axis_scales, z_vector_base)[0]
 
             if getattr(transform, 'scale', None):
                 if isinstance(transform.scale, list):
@@ -830,27 +830,27 @@ def to_geometry(self, entity, coordinate_system=None, transform=None):
         else:
             center_transformed = center_with_units
 
-        return self.generate_arc_geometry(center_transformed, entity.start_angle, entity.end_angle, radius)
+        return generate_arc_geometry(self, center_transformed, entity.start_angle, entity.end_angle, radius)
 
     # circles
     elif hasattr(entity, 'center') and hasattr(entity, 'radius'):
         # Stage 1: apply coordinate system transforms to center
-        center_with_units = self.apply_transforms([entity.center], coordinate_system, None)[0]
+        center_with_units = apply_transforms(self, [entity.center], coordinate_system, None)[0]
 
         # Stage 1: scale radius by coordinate system only
         radius = entity.radius
         if isinstance(radius, str):
-            radius_expr = self.expand_macros(radius)
+            radius_expr = expand_macros(self, radius)
             try:
-                radius = self.to_pt(radius_expr)
+                radius = to_pt(self, radius_expr)
             except Exception:
-                radius = float(self._eval_simple_expression(radius_expr))
+                radius = float(_eval_simple_expression(self, radius_expr))
         axis_mag_x, axis_mag_y = axis_scales
         radius *= (axis_mag_x + axis_mag_y) / 2.0
 
         # Stage 2: apply entity transforms
         if transform:
-            center_transformed = self.apply_transform_only([center_with_units], transform, axis_scales, z_vector_base)[0]
+            center_transformed = apply_transform_only(self, [center_with_units], transform, axis_scales, z_vector_base)[0]
 
             if getattr(transform, 'scale', None):
                 if isinstance(transform.scale, list):
@@ -865,11 +865,11 @@ def to_geometry(self, entity, coordinate_system=None, transform=None):
     # line_segments
     elif hasattr(entity, 'from_') and hasattr(entity, 'to'):
         # Stage 1: apply coordinate system transforms only
-        coords_with_units = self.apply_transforms([entity.from_, entity.to], coordinate_system, None)
+        coords_with_units = apply_transforms(self, [entity.from_, entity.to], coordinate_system, None)
 
         # Stage 2: apply entity transforms if present
         if transform:
-            coords_with_units = self.apply_transform_only(coords_with_units, transform, axis_scales, z_vector_base)
+            coords_with_units = apply_transform_only(self, coords_with_units, transform, axis_scales, z_vector_base)
 
         return LineString(coords_with_units)
 
@@ -885,11 +885,11 @@ def to_geometry(self, entity, coordinate_system=None, transform=None):
         self._debug(f"node rotate (local): {node_local_rotation}")
 
         # Stage 1: apply coordinate system transforms to 'at' coordinate
-        at_with_units = self.apply_transforms([entity.at], coordinate_system, None)[0]
+        at_with_units = apply_transforms(self, [entity.at], coordinate_system, None)[0]
 
         # Stage 2: apply scope transforms to 'at' coordinate
         if node_scope_transform:
-            transformed_at = self.apply_transform_only([at_with_units], node_scope_transform, axis_scales, z_vector_base)[0]
+            transformed_at = apply_transform_only(self, [at_with_units], node_scope_transform, axis_scales, z_vector_base)[0]
         else:
             transformed_at = at_with_units
 
@@ -900,8 +900,8 @@ def to_geometry(self, entity, coordinate_system=None, transform=None):
         cleaned_text = self.clean_latex_text(entity.text)
         self._debug(f"cleaned text: '{entity.text}' → '{cleaned_text}'")
         xmin, ymin, xmax, ymax = font.getbbox(cleaned_text)
-        text_width = self.to_pt(xmax - xmin, "px")
-        text_height = self.to_pt(ymax - ymin, "px")
+        text_width = to_pt(self, xmax - xmin, "px")
+        text_height = to_pt(self, ymax - ymin, "px")
         self._debug(f"text dimensions: {text_width:.1f} x {text_height:.1f} pt")
 
         # position node so anchor sits on transformed_at
@@ -921,7 +921,7 @@ def to_geometry(self, entity, coordinate_system=None, transform=None):
         if node_local_rotation is not None:
             self._debug(f"applying node rotation {node_local_rotation}° around anchor at {transformed_at}")
             final_corners = [
-                self.rotate_point_around_center(corner, node_local_rotation, transformed_at)
+                rotate_point_around_center(self, corner, node_local_rotation, transformed_at)
                 for corner in bbox_corners
             ]
         else:
@@ -946,11 +946,11 @@ def _resolve_transform_scale(self, transform):
         return (1.0, 1.0, 1.0)
     scale_field = transform.scale
     if isinstance(scale_field, list):
-        sx = self._to_float_default(scale_field[0], 1.0)
-        sy = self._to_float_default(scale_field[1], sx) if len(scale_field) >= 2 else sx
-        sz = self._to_float_default(scale_field[2], sx) if len(scale_field) >= 3 else sx
+        sx = _to_float_default(self, scale_field[0], 1.0)
+        sy = _to_float_default(self, scale_field[1], sx) if len(scale_field) >= 2 else sx
+        sz = _to_float_default(self, scale_field[2], sx) if len(scale_field) >= 3 else sx
     else:
-        sx = sy = sz = self._to_float_default(scale_field, 1.0)
+        sx = sy = sz = _to_float_default(self, scale_field, 1.0)
     return (sx, sy, sz)
 
 
@@ -958,22 +958,22 @@ def _resolve_transform_shift(self, transform):
     shift = [0.0, 0.0, 0.0]
     if transform and getattr(transform, 'shift', None):
         for idx, val in enumerate(transform.shift[:3]):
-            shift[idx] = self._to_float_default(val, 0.0)
+            shift[idx] = _to_float_default(self, val, 0.0)
     return tuple(shift)
 
 
 def transformed_3d_vertices(self, vertices, transform):
     if not vertices:
         return []
-    sx, sy, sz = self._resolve_transform_scale(transform)
-    shift_x, shift_y, shift_z = self._resolve_transform_shift(transform)
+    sx, sy, sz = _resolve_transform_scale(self, transform)
+    shift_x, shift_y, shift_z = _resolve_transform_shift(self, transform)
     transformed = []
     for vertex in vertices:
         if not isinstance(vertex, (list, tuple)) or len(vertex) < 3:
             continue
-        vx = self._to_float_default(vertex[0], 0.0) * sx + shift_x
-        vy = self._to_float_default(vertex[1], 0.0) * sy + shift_y
-        vz = self._to_float_default(vertex[2], 0.0) * sz + shift_z
+        vx = _to_float_default(self, vertex[0], 0.0) * sx + shift_x
+        vy = _to_float_default(self, vertex[1], 0.0) * sy + shift_y
+        vz = _to_float_default(self, vertex[2], 0.0) * sz + shift_z
         transformed.append((vx, vy, vz))
     return transformed
 
