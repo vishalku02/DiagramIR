@@ -402,82 +402,6 @@ class Evaluator:
                     )
         return mismatches
 
-    # Geometry-engine compatibility wrappers.
-    # The extracted geometry module calls helpers via `self.*`.
-    def expand_macros(self, expr: str) -> str:
-        return geometry_engine.expand_macros(self, expr)
-
-    def to_pt(self, value, unit: str = "pt") -> float:
-        return geometry_engine.to_pt(self, value, unit)
-
-    def _parse_simple_term(self, term: str) -> float:
-        return geometry_engine._parse_simple_term(self, term)
-
-    def _eval_simple_expression(self, expr: str) -> float:
-        return geometry_engine._eval_simple_expression(self, expr)
-
-    def _shift_to_units(self, value, axis_base_scale):
-        return geometry_engine._shift_to_units(self, value, axis_base_scale)
-
-    def _parse_axis_vector(self, spec, default_angle_deg):
-        return geometry_engine._parse_axis_vector(self, spec, default_angle_deg)
-
-    def _axes_from_coordinate_system(self, coordinate_system):
-        return geometry_engine._axes_from_coordinate_system(self, coordinate_system)
-
-    def _base_z_vector(self, coordinate_system):
-        return geometry_engine._base_z_vector(self, coordinate_system)
-
-    def _dimension_to_pt(self, dim) -> float:
-        return geometry_engine._dimension_to_pt(self, dim)
-
-    def build_transformation_matrix(self, coordinate_system, transform):
-        return geometry_engine.build_transformation_matrix(self, coordinate_system, transform)
-
-    def apply_matrix_transform(self, coord, matrix):
-        return geometry_engine.apply_matrix_transform(self, coord, matrix)
-
-    def apply_transforms(self, points, coordinate_system, transform):
-        return geometry_engine.apply_transforms(self, points, coordinate_system, transform)
-
-    def apply_transform_only(self, points, transform, axis_scales=None, z_vector_base=None):
-        return geometry_engine.apply_transform_only(self, points, transform, axis_scales, z_vector_base)
-
-    def generate_arc_geometry(self, center, start_angle, end_angle, radius, num_segments=100):
-        return geometry_engine.generate_arc_geometry(
-            self, center, start_angle, end_angle, radius, num_segments
-        )
-
-    def project_3d_to_2d(self, coords_3d, coordinate_system, meta=None):
-        return geometry_engine.project_3d_to_2d(self, coords_3d, coordinate_system, meta)
-
-    def rotate_point_around_center(self, point, center, angle_deg):
-        return geometry_engine.rotate_point_around_center(self, point, center, angle_deg)
-
-    def to_geometry(self, entity, coordinate_system, transform=None):
-        return geometry_engine.to_geometry(self, entity, coordinate_system, transform)
-
-    def unit_cube_vertices(self, cube):
-        return geometry_engine.unit_cube_vertices(self, cube)
-
-    def unit_cube_faces(self, cube):
-        return geometry_engine.unit_cube_faces(self, cube)
-
-    def expand_unit_cube_faces(self, cube, coordinate_system):
-        return geometry_engine.expand_unit_cube_faces(self, cube, coordinate_system)
-
-    def _to_float_default(self, value, default):
-        return geometry_engine._to_float_default(self, value, default)
-
-    def _resolve_transform_scale(self, transform):
-        return geometry_engine._resolve_transform_scale(self, transform)
-
-    def _resolve_transform_shift(self, transform):
-        return geometry_engine._resolve_transform_shift(self, transform)
-
-    def transformed_3d_vertices(self, vertices, transform):
-        return geometry_engine.transformed_3d_vertices(self, vertices, transform)
-
     def _load_font(self):
         if getattr(self, '_font_cache', None) is not None:
             return self._font_cache
@@ -1794,8 +1718,7 @@ class Evaluator:
             transformed_center = geometry_engine.apply_transforms(self, [center], coordinate_system, None)[0]
             transformed_center = (transformed_center[0], transformed_center[1])
             if transform:
-                transformed_center = geometry_engine.apply_transform_only(self, 
-                    [transformed_center],
+                transformed_center = geometry_engine.apply_transform_only(self, [transformed_center],
                     transform,
                     axis_scales,
                     z_vector_base,

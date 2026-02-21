@@ -1,9 +1,4 @@
-"""Geometry helper functions extracted from `evaluator.py`.
-
-Each function expects to be bound to an `Evaluator` instance as the first
-argument so the evaluator can continue to provide unit conversions, debug
-logging, and font utilities without introducing a new abstraction.
-"""
+"""Geometry processing methods used by evaluator checks."""
 
 from __future__ import annotations
 
@@ -981,3 +976,4 @@ def transformed_3d_vertices(self, vertices, transform):
         vz = self._to_float_default(vertex[2], 0.0) * sz + shift_z
         transformed.append((vx, vy, vz))
     return transformed
+
